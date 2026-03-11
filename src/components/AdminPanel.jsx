@@ -629,7 +629,8 @@ export function AdminSchedule({ token }) {
                   const dow=new Date(iso+"T12:00:00").getDay(); // 0=nd,6=sob
                   const isWeekend=dow===0||dow===6;
                   return (
-                    <div key={d} style={{width:20,minWidth:20,flexShrink:0,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWeekend?"#aaa":C.greyMid,background:isToday?C.greenBg:isWeekend?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box"}}>
+                    <div key={d} onClick={()=>{ setSelDate(iso); setShowForm(true); setMsg(null); }}
+                      style={{width:20,minWidth:20,flexShrink:0,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWeekend?"#aaa":C.greyMid,background:isToday?C.greenBg:isWeekend?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box",cursor:"pointer"}}>
                       {d}
                     </div>
                   );
