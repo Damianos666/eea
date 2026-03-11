@@ -1,0 +1,278 @@
+import { useState, useEffect, useMemo } from "react";
+import { C, GROUPS } from "../lib/constants";
+import { TRAININGS } from "../data/trainings";
+import { db } from "../lib/supabase";
+import { useT } from "../lib/LangContext";
+
+
+
+function toISO(date) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+function today() { return toISO(new Date()); }
+
+// Generuje i pobiera plik .ics dla jednego szkolenia
+function downloadICS(s, t) {
+  const date = s.date.replace(/-/g, ""); // YYYYMMDD
+  const now  = new Date().toISOString().replace(/[-:.]/g,"").slice(0,15) + "Z";
+  const uid  = `${s.id}-${date}@engel-academy`;
+  const ics  = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//ENGEL Expert Academy//PL",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${now}`,
+    `DTSTART;VALUE=DATE:${date}`,
+    `DTEND;VALUE=DATE:${date}`,
+    `SUMMARY:${t.title}`,
+    `LOCATION:${s.room}`,
+    "DESCRIPTION:ENGEL Expert Academy",
+    "END:VEVENT",
+    "END:VCALENDAR"
+  ].join("\r\n");
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = `szkolenie-${t.id}-${date}.ics`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+
+export function ScheduleTab({ activeGroups, token, trainerNum }) {
+  const T = useT();
+  const [scheduled, setScheduled]   = useState([]);
+  const [loading,   setLoading]     = useState(true);
+  const [selected,  setSelected]    = useState(null);   // "YYYY-MM-DD" or null
+  const [viewYear,  setViewYear]    = useState(new Date().getFullYear());
+  const [viewMonth, setViewMonth]   = useState(new Date().getMonth());  // 0-11
+  const isTrainer = trainerNum != null;
+  const [activeTrainers, setActiveTrainers] = useState(trainerNum ? [Number(trainerNum)] : [1,2,3,4]);
+
+  // ── Pobierz harmonogram z bazy ──────────────────────────────────────────
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const data = await db.get(token, "scheduled_trainings", "order=date.asc");
+        const all = Array.isArray(data) ? data : [];
+        // Pokazuj tylko przyszłe w widoku klienta (nie usuwamy z bazy)
+        const todayStr = toISO(new Date());
+        setScheduled(all.filter(s => (s.end_date || s.date) >= todayStr));
+      } catch { setScheduled([]); }
+      finally { setLoading(false); }
+    }
+    load();
+  }, [token]);
+
+  // ── Filtruj wg aktywnych grup i trenera ────────────────────────────────
+  const visible = useMemo(() => scheduled.filter(s => {
+    const t = TRAININGS.find(t => t.id === s.training_id);
+    const groupOk = (s.training_id === "ST") ? true : (t && activeGroups.includes(t.group));
+    const trainerOk = !isTrainer || activeTrainers.length === 0 || activeTrainers.includes(Number(s.trainer_id));
+    return groupOk && trainerOk;
+  }), [scheduled, activeGroups, isTrainer, activeTrainers]);
+
+  // ── Zestaw dat z szkoleniami (tylko widoczne) ───────────────────────────
+  const datesWithTrainings = useMemo(() => {
+    const map = {};
+    visible.forEach(s => {
+      if (!map[s.date]) map[s.date] = [];
+      const t = TRAININGS.find(t => t.id === s.training_id);
+      if (t) map[s.date].push(t.group);
+    });
+    return map; // { "2025-03-15": ["tech","ur"], ... }
+  }, [visible]);
+
+  // ── Szkolenia do wyświetlenia (wybrana data LUB 3 najbliższe) ──────────
+  const displayItems = useMemo(() => {
+    const now = today();
+    if (selected) {
+      return visible.filter(s => s.date === selected);
+    }
+    // 3 najbliższe od dziś
+    return visible.filter(s => s.date >= now).slice(0, 3);
+  }, [visible, selected]);
+
+  // ── Kalendarz: oblicz dni ───────────────────────────────────────────────
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(viewYear, viewMonth, 1);
+    let startDow = firstDay.getDay(); // 0=Sun
+    startDow = startDow === 0 ? 6 : startDow - 1; // Pn=0
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < startDow; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    return cells;
+  }, [viewYear, viewMonth]);
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewYear(y => y-1); setViewMonth(11); }
+    else setViewMonth(m => m-1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewYear(y => y+1); setViewMonth(0); }
+    else setViewMonth(m => m+1);
+  }
+
+  const todayStr = today();
+
+  return (
+    <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",background:C.greyBg,display:"flex",flexDirection:"column"}}>
+
+      {/* ── KALENDARZ ── */}
+      <div style={{background:C.white,margin:"12px 12px 0",borderRadius:8,boxShadow:"0 1px 3px rgba(0,0,0,.07)",padding:"12px 10px"}}>
+
+        {/* Nawigacja miesiąca */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <button onClick={prevMonth} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.greyDk,padding:"4px 8px"}}>‹</button>
+          <span style={{fontSize:14,fontWeight:700,color:C.black,letterSpacing:.3}}>
+            {T.months[viewMonth]} {viewYear}
+          </span>
+          <button onClick={nextMonth} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.greyDk,padding:"4px 8px"}}>›</button>
+        </div>
+
+        {/* Nagłówki dni */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+          {T.days_short.map(d => (
+            <div key={d} style={{textAlign:"center",fontSize:9,fontWeight:700,color:C.greyMid,padding:"2px 0",letterSpacing:.5}}>{d}</div>
+          ))}
+        </div>
+
+        {/* Komórki */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+          {calendarDays.map((day, i) => {
+            if (!day) return <div key={`e${i}`}/>;
+            const iso = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const groups = datesWithTrainings[iso] || [];
+            const isToday = iso === todayStr;
+            const isSel   = iso === selected;
+            return (
+              <button key={iso} onClick={() => setSelected(isSel ? null : iso)}
+                style={{
+                  background: isSel ? C.black : isToday ? C.greenBg : "transparent",
+                  border: isToday && !isSel ? `1px solid ${C.green}` : "1px solid transparent",
+                  borderRadius: 6,
+                  padding: "5px 2px 3px",
+                  cursor: groups.length ? "pointer" : "default",
+                  display:"flex", flexDirection:"column", alignItems:"stretch", gap:2,
+                }}>
+                <span style={{fontSize:12,fontWeight: isToday||isSel ? 700 : 400,color: isSel ? C.white : isToday ? C.greenDk : C.greyDk, textAlign:"center"}}>
+                  {day}
+                </span>
+                {/* Kolorowe kropki — zawsze 3 sloty: lewy/środek/prawy */}
+                {groups.length > 0 && (() => {
+                  const uniq = [...new Set(groups)].slice(0,3);
+                  const slots = [uniq[0]||null, uniq[1]||null, uniq[2]||null];
+                  return (
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",padding:"0 2px",boxSizing:"border-box"}}>
+                      {slots.map((g, idx) => {
+                        const grp = g ? GROUPS.find(x => x.id===g) : null;
+                        return <div key={idx} style={{width:4,height:4,borderRadius:"50%",flexShrink:0,background: g ? (isSel ? C.white : (grp?.color||C.green)) : "transparent"}}/>;
+                      })}
+                    </div>
+                  );
+                })()}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Legenda */}
+        <div style={{display:"flex",gap:12,marginTop:10,paddingTop:8,borderTop:`1px solid ${C.grey}`,flexWrap:"wrap"}}>
+          {GROUPS.filter(g => activeGroups.includes(g.id)).map(g => (
+            <div key={g.id} style={{display:"flex",alignItems:"center",gap:4}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:g.color}}/>
+              <span style={{fontSize:10,color:C.greyMid}}>{g.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Filtry trenerów — tylko dla kont trenerów */}
+        {isTrainer && (
+          <div style={{display:"flex",gap:6,marginTop:10,paddingTop:10,borderTop:`1px solid ${C.grey}`}}>
+            {[1,2,3,4].map(n => {
+              const active = activeTrainers.includes(n);
+              return (
+                <button key={n} onClick={() => setActiveTrainers(prev =>
+                  active ? prev.filter(x => x !== n) : [...prev, n]
+                )}
+                  style={{flex:1,padding:"8px 0",background:active?C.green:C.white,color:active?C.white:C.greyDk,border:`1.5px solid ${active?C.green:C.grey}`,borderRadius:6,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── LISTA SZKOLEŃ ── */}
+      <div style={{padding:"10px 12px 12px"}}>
+
+        {/* Nagłówek sekcji */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+          <span style={{fontSize:11,fontWeight:700,color:C.greyMid,letterSpacing:1}}>
+            {selected
+              ? (() => { const d=new Date(selected+"T00:00:00"); return `${d.getDate()} ${T.months[d.getMonth()]} ${d.getFullYear()}`; })()
+              : T.upcoming_3}
+          </span>
+          {selected && (
+            <button onClick={() => setSelected(null)}
+              style={{background:"none",border:"none",fontSize:11,color:C.greyMid,cursor:"pointer",textDecoration:"underline"}}>
+              pokaż najbliższe
+            </button>
+          )}
+        </div>
+
+        {loading && <div style={{textAlign:"center",padding:24,color:C.greyMid,fontSize:13}}>Ładowanie…</div>}
+
+        {!loading && displayItems.length === 0 && (
+          <div style={{textAlign:"center",padding:24,color:C.greyMid,fontSize:13}}>
+            {selected ? T.no_trainings_day : T.no_trainings}
+          </div>
+        )}
+
+        {!loading && displayItems.map((s, i) => {
+          const t = TRAININGS.find(x => x.id === s.training_id);
+          if (!t) return null;
+          const grp  = GROUPS.find(g => g.id === t.group);
+          const date = new Date(s.date + "T00:00:00");
+          const dayNames = ["Niedziela","Poniedziałek","Wtorek","Środa","Czwartek","Piątek","Sobota"];
+
+          return (
+            <div key={`${s.date}-${i}`} style={{
+              background:C.white,borderRadius:8,padding:"12px 14px",marginBottom:8,
+              boxShadow:"0 1px 3px rgba(0,0,0,.07)",
+              borderLeft:`4px solid ${grp?.color||C.green}`
+            }}>
+              {/* Data + Sala */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <span style={{fontSize:11,fontWeight:700,color:grp?.color||C.green}}>
+                  {T.days_full[date.getDay()]}, {date.getDate()} {T.months[date.getMonth()]} {date.getFullYear()}
+                </span>
+                <span style={{fontSize:10,background:C.greyBg,border:`1px solid ${C.grey}`,padding:"2px 8px",borderRadius:4,color:C.greyDk,fontWeight:600}}>
+                  {s.room}
+                </span>
+              </div>
+              {/* Nazwa szkolenia */}
+              <div style={{fontSize:13,fontWeight:700,color:C.black,lineHeight:1.3,marginBottom:4}}>{t.title}</div>
+              {/* Tagi + Outlook */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:6,flexWrap:"wrap",marginTop:4}}>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <span style={{fontSize:9,fontWeight:700,color:grp?.color,background:`${grp?.color}18`,padding:"2px 7px"}}>{grp?.label}</span>
+                  <span style={{fontSize:9,color:C.greyMid,padding:"2px 4px"}}>{t.duration}</span>
+                  <span style={{fontSize:9,color:C.greyMid,padding:"2px 4px"}}>ID: {t.id}</span>
+                </div>
+                <button onClick={() => downloadICS(s, t)}
+                  title="Dodaj do kalendarza (.ics)"
+                  style={{background:"#F0F7FF",border:"1px solid #0072C6",borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:16,lineHeight:1,flexShrink:0}}>
+                  📅
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
