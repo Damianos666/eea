@@ -629,8 +629,7 @@ export function AdminSchedule({ token }) {
                   const dow=new Date(iso+"T12:00:00").getDay(); // 0=nd,6=sob
                   const isWeekend=dow===0||dow===6;
                   return (
-                    <div key={d} onClick={()=>{ setSelDate(iso); setShowForm(true); setMsg(null); }}
-                      style={{width:20,minWidth:20,flexShrink:0,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWeekend?"#aaa":C.greyMid,background:isToday?C.greenBg:isWeekend?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box",cursor:"pointer"}}>
+                    <div key={d} style={{width:20,minWidth:20,flexShrink:0,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWeekend?"#aaa":C.greyMid,background:isToday?C.greenBg:isWeekend?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box"}}>
                       {d}
                     </div>
                   );
@@ -649,14 +648,14 @@ export function AdminSchedule({ token }) {
                   </div>
                   {/* Obszar z paskami — position:relative na div, nie na td */}
                   <div style={{position:"relative",height:30,flex:1,minWidth:daysInMonth*20}}>
-                    {/* Tło kolumn — weekendy szare, dziś zielone */}
+                    {/* Klikalne komórki dni — otwierają formularz z datą i trenerem */}
                     {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>{
                       const iso=`${monthISO}-${String(d).padStart(2,"0")}`;
                       const isToday=iso===todayISO;
                       const dow=new Date(iso+"T12:00:00").getDay();
                       const isWeekend=dow===0||dow===6;
-                      if(!isToday&&!isWeekend) return null;
-                      return <div key={d} style={{position:"absolute",left:(d-1)*20,top:0,width:20,height:"100%",background:isToday?"rgba(138,183,62,.12)":"rgba(0,0,0,.05)",pointerEvents:"none",zIndex:0}}/>;
+                      return <div key={d} onClick={()=>{ setSelDate(iso); setSelTrainer(tid); setShowForm(true); setMsg(null); window.scrollTo&&window.scrollTo({top:9999,behavior:"smooth"}); }}
+                        style={{position:"absolute",left:(d-1)*20,top:0,width:20,height:"100%",background:isToday?"rgba(138,183,62,.12)":isWeekend?"rgba(0,0,0,.05)":"transparent",cursor:"pointer",zIndex:0}}/>;
                     })}
                     {/* Pionowe linie */}
                     {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>(
