@@ -235,7 +235,7 @@ export function MessagesTab({ token, userEmail, user }) {
           </div>
         )}
         <button onClick={() => setContactOpen(o => !o)}
-          style={{width:64,height:64,borderRadius:"50%",background:contactOpen?C.greyDk:C.black,border:"none",color:C.white,fontSize:36,cursor:"pointer",boxShadow:"0 2px 16px rgba(0,0,0,.3)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          style={{width:64,height:64,borderRadius:"50%",background:contactOpen?C.greyDk:C.black,border:"none",color:C.white,fontSize:52,cursor:"pointer",boxShadow:"0 2px 16px rgba(0,0,0,.3)",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,paddingBottom:2}}>
           {contactOpen ? "✕" : "✆"}
         </button>
       </div>
