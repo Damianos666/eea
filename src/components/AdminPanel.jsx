@@ -491,6 +491,8 @@ export function AdminSchedule({ token }) {
   const tapCounts   = useRef({});
   const tapTimers   = useRef({});
   const timelineRef = useRef(null);
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const monthISO = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}`;
   const [cellW, setCellW] = useState(20);
 
   useEffect(() => {
@@ -695,8 +697,6 @@ export function AdminSchedule({ token }) {
   }
 
   // ── Timeline ──
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const monthISO = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}`;
   const todayISO = toISO(now);
 
   const timelineData = useMemo(() => {
