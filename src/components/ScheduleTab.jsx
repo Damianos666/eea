@@ -164,15 +164,14 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
                 <span style={{fontSize:12,fontWeight: isToday||isSel ? 700 : 400,color: isSel ? C.white : isToday ? C.greenDk : C.greyDk, textAlign:"center"}}>
                   {day}
                 </span>
-                {/* Kolorowe kropki — zawsze 3 sloty: lewy/środek/prawy */}
+                {/* Kolorowe kropki — wyśrodkowane, obok siebie */}
                 {groups.length > 0 && (() => {
                   const uniq = [...new Set(groups)].slice(0,3);
-                  const slots = [uniq[0]||null, uniq[1]||null, uniq[2]||null];
                   return (
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",padding:"0 2px",boxSizing:"border-box"}}>
-                      {slots.map((g, idx) => {
+                    <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:2,width:"100%"}}>
+                      {uniq.map((g, idx) => {
                         const grp = g ? GROUPS.find(x => x.id===g) : null;
-                        return <div key={idx} style={{width:4,height:4,borderRadius:"50%",flexShrink:0,background: g ? (isSel ? C.white : (grp?.color||C.green)) : "transparent"}}/>;
+                        return <div key={idx} style={{width:4,height:4,borderRadius:"50%",flexShrink:0,background: isSel ? C.white : (grp?.color||C.green)}}/>;
                       })}
                     </div>
                   );
@@ -183,7 +182,7 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
         </div>
 
         {/* Legenda */}
-        <div style={{display:"flex",gap:12,marginTop:10,paddingTop:8,borderTop:`1px solid ${C.grey}`,flexWrap:"wrap"}}>
+        <div style={{display:"flex",justifyContent:"center",gap:12,marginTop:10,paddingTop:8,borderTop:`1px solid ${C.grey}`,flexWrap:"wrap"}}>
           {GROUPS.filter(g => activeGroups.includes(g.id)).map(g => (
             <div key={g.id} style={{display:"flex",alignItems:"center",gap:4}}>
               <div style={{width:8,height:8,borderRadius:"50%",background:g.color}}/>
