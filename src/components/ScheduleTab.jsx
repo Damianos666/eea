@@ -56,9 +56,13 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
       try {
         const data = await db.get(token, "scheduled_trainings", "order=date.asc");
         const all = Array.isArray(data) ? data : [];
-        // Pokazuj tylko przyszłe w widoku klienta (nie usuwamy z bazy)
+        // Pokazuj tylko przyszłe, aktywne i nieskryte szkolenia
         const todayStr = toISO(new Date());
-        setScheduled(all.filter(s => (s.end_date || s.date) >= todayStr));
+        setScheduled(all.filter(s =>
+          (s.end_date || s.date) >= todayStr &&
+          !s.is_hidden &&
+          (s.status || "active") === "active"
+        ));
       } catch { setScheduled([]); }
       finally { setLoading(false); }
     }
