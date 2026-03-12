@@ -571,10 +571,18 @@ export function AdminSchedule({ token }) {
 
   async function toggleBarStatus(entry) {
     const newStatus = (entry.status || "active") === "active" ? "planned" : "active";
+    // Optymistyczna aktualizacja UI
+    setScheduled(s => s.map(x => x.id === entry.id ? {...x, status: newStatus} : x));
     try {
-      await db.update(token, "scheduled_trainings", `id=eq.${entry.id}`, {status: newStatus});
-      setScheduled(s => s.map(x => x.id === entry.id ? {...x, status: newStatus} : x));
-    } catch(e) { alert("Błąd: " + e.message); }
+      const result = await db.update(token, "scheduled_trainings", `id=eq.${entry.id}`, {status: newStatus});
+      if (Array.isArray(result) && result.length === 0) {
+        throw new Error("0 wierszy zaktualizowanych — sprawdź uprawnienia lub uruchom migrację SQL");
+      }
+    } catch(e) {
+      // Cofnij optymistyczną zmianę
+      setScheduled(s => s.map(x => x.id === entry.id ? {...x, status: entry.status || "active"} : x));
+      setMsg({ok:false, text:"Błąd zapisu statusu: " + e.message});
+    }
   }
 
   const groupTrainings = TRAININGS.filter(t => t.group === selGroup);
@@ -617,6 +625,7 @@ export function AdminSchedule({ token }) {
     setSaving(true); setMsg(null);
     try {
       const days = trainingMode === "ST" ? stDays : parseDays(TRAININGS.find(t=>t.id===selTraining)?.duration);
+      const partVal = partCount !== "" ? parseInt(partCount) : null;
       const payload = {
         training_id: trainingMode === "ST" ? "ST" : selTraining,
         trainer_id: selTrainer,
@@ -625,12 +634,26 @@ export function AdminSchedule({ token }) {
         duration_days: days,
         is_hidden: isHidden,
         notes: notes.trim(),
-        participants_count: partCount !== "" ? parseInt(partCount) : null,
+        participants_count: partVal,
       };
-      await db.update(token, "scheduled_trainings", `id=eq.${editingId}`, payload);
-      setMsg({ok:true,text:"✓ Zmiany zapisane!"}); closeForm(); await loadScheduled();
-    } catch(e) { setMsg({ok:false,text:"Błąd zapisu: "+e.message}); }
-    setSaving(false);
+      const result = await db.update(token, "scheduled_trainings", `id=eq.${editingId}`, payload);
+      if (Array.isArray(result) && result.length === 0) {
+        throw new Error("0 wierszy zaktualizowanych — sprawdź uprawnienia RLS lub uruchom migrację SQL");
+      }
+      // Aktualizuj lokalny stan od razu (bez czekania na reload)
+      setScheduled(s => s.map(x => x.id === editingId ? {
+        ...x, ...payload,
+        participants_count: partVal,
+        is_hidden: isHidden,
+      } : x));
+      setSaving(false);
+      closeForm();
+      setMsg({ok:true,text:"✓ Zmiany zapisane!"});
+      await loadScheduled();
+    } catch(e) {
+      setMsg({ok:false,text:"Błąd zapisu: "+e.message});
+      setSaving(false);
+    }
   }
 
   async function deleteEntry(id) {
