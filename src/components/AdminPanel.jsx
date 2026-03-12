@@ -496,15 +496,20 @@ export function AdminSchedule({ token }) {
   const [cellW, setCellW] = useState(20);
 
   useEffect(() => {
-    function updateCellW() {
-      if (!timelineRef.current) return;
-      const available = timelineRef.current.clientWidth - 46;
-      const natural = daysInMonth * 20;
-      setCellW(available > natural ? available / daysInMonth : 20);
-    }
-    updateCellW();
-    window.addEventListener("resize", updateCellW);
-    return () => window.removeEventListener("resize", updateCellW);
+    if (!timelineRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const available = entry.contentRect.width - 46;
+        const natural = daysInMonth * 20;
+        setCellW(available > natural ? available / daysInMonth : 20);
+      }
+    });
+    ro.observe(timelineRef.current);
+    // Też uruchom od razu
+    const available = timelineRef.current.clientWidth - 46;
+    const natural = daysInMonth * 20;
+    setCellW(available > natural ? available / daysInMonth : 20);
+    return () => ro.disconnect();
   }, [daysInMonth, viewYear, viewMonth]);
 
   useEffect(() => { loadScheduled(); }, []);
