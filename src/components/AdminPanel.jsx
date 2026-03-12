@@ -442,7 +442,7 @@ export function AdminTrainings({ token }) {
 /* ── Admin: Terminarz (Planer) ── */
 const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec",
                    "Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
-const TIMELINE_TRAINERS = [1,2,3,4];
+const TIMELINE_TRAINERS = [1,2,3,4,5];
 
 function toISO(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
@@ -490,8 +490,38 @@ export function AdminSchedule({ token }) {
   const pressTimers = useRef({});
   const tapCounts   = useRef({});
   const tapTimers   = useRef({});
+  const timelineRef = useRef(null);
+  const [cellW, setCellW] = useState(20);
+
+  useEffect(() => {
+    function updateCellW() {
+      if (!timelineRef.current) return;
+      const available = timelineRef.current.clientWidth - 46;
+      const natural = daysInMonth * 20;
+      setCellW(available > natural ? available / daysInMonth : 20);
+    }
+    updateCellW();
+    window.addEventListener("resize", updateCellW);
+    return () => window.removeEventListener("resize", updateCellW);
+  }, [daysInMonth, viewYear, viewMonth]);
 
   useEffect(() => { loadScheduled(); }, []);
+
+  // Przewiń timeline tak, aby dziś był w ok. 1/4 widoku
+  useEffect(() => {
+    if (!timelineRef.current) return;
+    const today = new Date();
+    if (today.getFullYear() !== viewYear || today.getMonth() !== viewMonth) return;
+    const todayDay = today.getDate();
+    const containerWidth = timelineRef.current.clientWidth;
+    const labelWidth = 46;
+    const cellW_ = timelineRef.current.scrollWidth > 0
+      ? (timelineRef.current.scrollWidth - 46) / daysInMonth
+      : 20;
+    const todayLeft = labelWidth + (todayDay - 1) * cellW_;
+    const scrollTo = todayLeft - containerWidth / 4;
+    timelineRef.current.scrollLeft = Math.max(0, scrollTo);
+  }, [viewYear, viewMonth, loading]);
 
   async function loadScheduled() {
     setLoading(true);
@@ -713,6 +743,7 @@ export function AdminSchedule({ token }) {
           isHidden: s.is_hidden || false,
           participantsCount: s.participants_count,
           entry: s,
+          cellW,
         };
       }).filter(Boolean);
       return { trainerId, bars };
@@ -725,8 +756,8 @@ export function AdminSchedule({ token }) {
   function BarItem({ bar }) {
     if (bar.isPreview) {
       return (
-        <div style={{position:"absolute",left:(bar.startDay-1)*20,top:4,height:22,
-          width:Math.max(18,(bar.endDay-bar.startDay+1)*20-2),zIndex:2,
+        <div style={{position:"absolute",left:(bar.startDay-1)*(bar.cellW||20),top:4,height:22,
+          width:Math.max((bar.cellW||20)-2,(bar.endDay-bar.startDay+1)*(bar.cellW||20)-2),zIndex:2,
           background:bar.color+"99",borderRadius:3,display:"flex",alignItems:"center",
           padding:"0 3px",overflow:"hidden",boxSizing:"border-box",
           border:`1px dashed ${bar.color}`,cursor:"default"}}>
@@ -734,7 +765,8 @@ export function AdminSchedule({ token }) {
         </div>
       );
     }
-    const w = Math.max(18,(bar.endDay-bar.startDay+1)*20-2);
+    const cw = bar.cellW || 20;
+    const w = Math.max(cw-2,(bar.endDay-bar.startDay+1)*cw-2);
     const badgeVal = bar.participantsCount != null ? bar.participantsCount : null;
     return (
       <div
@@ -747,7 +779,7 @@ export function AdminSchedule({ token }) {
         onContextMenu={e => e.preventDefault()}
         title={`${bar.title}${bar.isPlanned?" [planowane]":""}${bar.isHidden?" [ukryte]":""}\nTap=edytuj · 2×tap=planned · przytrzymaj=usuń`}
         style={{
-          position:"absolute",left:(bar.startDay-1)*20,top:4,height:22,width:w,zIndex:2,
+          position:"absolute",left:(bar.startDay-1)*cw,top:4,height:22,width:w,zIndex:2,
           background:bar.color,borderRadius:3,display:"flex",alignItems:"center",
           padding:"0 3px",gap:2,cursor:"pointer",overflow:"hidden",boxSizing:"border-box",
           opacity: bar.isPlanned ? 0.75 : 1,
@@ -785,7 +817,7 @@ export function AdminSchedule({ token }) {
             style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:C.greyDk,padding:"4px 10px",lineHeight:1}}>›</button>
         </div>
 
-        <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+        <div ref={timelineRef} style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
           <div style={{display:"inline-block",minWidth:"100%",verticalAlign:"top"}}>
             {/* Nagłówek dni */}
             <div style={{display:"flex",borderBottom:`2px solid ${C.grey}`}}>
@@ -796,7 +828,7 @@ export function AdminSchedule({ token }) {
                   const isToday=iso===todayISO;
                   const isWe=new Date(iso+"T12:00:00").getDay()%6===0;
                   return (
-                    <div key={d} style={{width:20,minWidth:20,flexShrink:0,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWe?"#aaa":C.greyMid,background:isToday?C.greenBg:isWe?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box"}}>
+                    <div key={d} style={{width:cellW,minWidth:cellW,flexShrink:0,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWe?"#aaa":C.greyMid,background:isToday?C.greenBg:isWe?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box"}}>
                       {d}
                     </div>
                   );
@@ -810,7 +842,7 @@ export function AdminSchedule({ token }) {
               return (
                 <div key={tid} style={{display:"flex",borderBottom:`1px solid ${C.grey}`}}>
                   <div style={{width:46,minWidth:46,flexShrink:0,background:"#f7f7f7",borderRight:`1px solid ${C.grey}`,fontSize:9,fontWeight:700,color:C.greyDk,display:"flex",alignItems:"center",justifyContent:"center",height:30}}>T{tid}</div>
-                  <div style={{position:"relative",height:30,flex:1,minWidth:daysInMonth*20}}>
+                  <div style={{position:"relative",height:30,flex:1,minWidth:daysInMonth*cellW}}>
                     {/* Klikalne komórki — otwierają formularz nowego szkolenia */}
                     {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>{
                       const iso=`${monthISO}-${String(d).padStart(2,"0")}`;
@@ -818,11 +850,11 @@ export function AdminSchedule({ token }) {
                       const isWe=new Date(iso+"T12:00:00").getDay()%6===0;
                       return (
                         <div key={d} onClick={()=>openNewForm(iso,tid)}
-                          style={{position:"absolute",left:(d-1)*20,top:0,width:20,height:"100%",background:isToday?"rgba(138,183,62,.12)":isWe?"rgba(0,0,0,.05)":"transparent",cursor:"pointer",zIndex:0}}/>
+                          style={{position:"absolute",left:(d-1)*cellW,top:0,width:cellW,height:"100%",background:isToday?"rgba(138,183,62,.12)":isWe?"rgba(0,0,0,.05)":"transparent",cursor:"pointer",zIndex:0}}/>
                       );
                     })}
                     {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>(
-                      <div key={d} style={{position:"absolute",left:d*20,top:0,width:1,height:"100%",background:"#efefef",pointerEvents:"none",zIndex:0}}/>
+                      <div key={d} style={{position:"absolute",left:d*cellW,top:0,width:1,height:"100%",background:"#efefef",pointerEvents:"none",zIndex:0}}/>
                     ))}
                     {roomBars.map((bar,bi)=><BarItem key={bi} bar={bar}/>)}
                   </div>

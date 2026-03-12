@@ -23,10 +23,9 @@ function downloadICS(s, t) {
     "BEGIN:VEVENT",
     `UID:${uid}`,
     `DTSTAMP:${now}`,
-    `DTSTART;VALUE=DATE:${date}`,
-    `DTEND;VALUE=DATE:${date}`,
+    `DTSTART;TZID=Europe/Warsaw:${date}T083000`,
+    `DTEND;TZID=Europe/Warsaw:${date}T160000`,
     `SUMMARY:${t.title}`,
-    `LOCATION:${s.room}`,
     "DESCRIPTION:ENGEL Expert Academy",
     "END:VEVENT",
     "END:VCALENDAR"
@@ -60,8 +59,7 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
         const todayStr = toISO(new Date());
         setScheduled(all.filter(s =>
           (s.end_date || s.date) >= todayStr &&
-          !s.is_hidden &&
-          (s.status || "active") === "active"
+          !s.is_hidden
         ));
       } catch { setScheduled([]); }
       finally { setLoading(false); }
@@ -82,10 +80,14 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
     const map = {};
     visible.forEach(s => {
       if (!map[s.date]) map[s.date] = [];
-      const t = TRAININGS.find(t => t.id === s.training_id);
-      if (t) map[s.date].push(t.group);
+      if (s.training_id === "ST") {
+        map[s.date].push("ST");
+      } else {
+        const t = TRAININGS.find(t => t.id === s.training_id);
+        if (t) map[s.date].push(t.group);
+      }
     });
-    return map; // { "2025-03-15": ["tech","ur"], ... }
+    return map;
   }, [visible]);
 
   // ── Szkolenia do wyświetlenia (wybrana data LUB 3 najbliższe) ──────────
@@ -170,8 +172,8 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
                   return (
                     <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:2,width:"100%"}}>
                       {uniq.map((g, idx) => {
-                        const grp = g ? GROUPS.find(x => x.id===g) : null;
-                        return <div key={idx} style={{width:4,height:4,borderRadius:"50%",flexShrink:0,background: isSel ? C.white : (grp?.color||C.green)}}/>;
+                        const dotColor = g === "ST" ? "#8E44AD" : (GROUPS.find(x => x.id===g)?.color || C.green);
+                        return <div key={idx} style={{width:4,height:4,borderRadius:"50%",flexShrink:0,background: isSel ? C.white : dotColor}}/>;
                       })}
                     </div>
                   );
@@ -189,6 +191,10 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
               <span style={{fontSize:10,color:C.greyMid}}>{g.label}</span>
             </div>
           ))}
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:"#8E44AD"}}/>
+            <span style={{fontSize:10,color:C.greyMid}}>Specjalne</span>
+          </div>
         </div>
 
         {/* Filtry trenerów — tylko dla kont trenerów */}
@@ -236,9 +242,12 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
         )}
 
         {!loading && displayItems.map((s, i) => {
-          const t = TRAININGS.find(x => x.id === s.training_id);
-          if (!t) return null;
-          const grp  = GROUPS.find(g => g.id === t.group);
+          const isST = s.training_id === "ST";
+          const t = isST ? null : TRAININGS.find(x => x.id === s.training_id);
+          if (!isST && !t) return null;
+          const grp = t ? GROUPS.find(g => g.id === t.group) : null;
+          const barColor = isST ? "#8E44AD" : (grp?.color || C.green);
+          const title = isST ? (s.custom_name || "Szkolenie specjalne") : t.title;
           const date = new Date(s.date + "T00:00:00");
           const dayNames = ["Niedziela","Poniedziałek","Wtorek","Środa","Czwartek","Piątek","Sobota"];
 
@@ -246,31 +255,39 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
             <div key={`${s.date}-${i}`} style={{
               background:C.white,borderRadius:8,padding:"12px 14px",marginBottom:8,
               boxShadow:"0 1px 3px rgba(0,0,0,.07)",
-              borderLeft:`4px solid ${grp?.color||C.green}`
+              borderLeft:`4px solid ${barColor}`
             }}>
-              {/* Data + Sala */}
+              {/* Data + Godzina */}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                <span style={{fontSize:11,fontWeight:700,color:grp?.color||C.green}}>
+                <span style={{fontSize:11,fontWeight:700,color:barColor}}>
                   {T.days_full[date.getDay()]}, {date.getDate()} {T.months[date.getMonth()]} {date.getFullYear()}
                 </span>
                 <span style={{fontSize:10,background:C.greyBg,border:`1px solid ${C.grey}`,padding:"2px 8px",borderRadius:4,color:C.greyDk,fontWeight:600}}>
-                  {s.room}
+                  8:30
                 </span>
               </div>
               {/* Nazwa szkolenia */}
-              <div style={{fontSize:13,fontWeight:700,color:C.black,lineHeight:1.3,marginBottom:4}}>{t.title}</div>
+              <div style={{fontSize:13,fontWeight:700,color:C.black,lineHeight:1.3,marginBottom:4}}>{title}</div>
               {/* Tagi + Outlook */}
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:6,flexWrap:"wrap",marginTop:4}}>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  <span style={{fontSize:9,fontWeight:700,color:grp?.color,background:`${grp?.color}18`,padding:"2px 7px"}}>{grp?.label}</span>
-                  <span style={{fontSize:9,color:C.greyMid,padding:"2px 4px"}}>{t.duration}</span>
-                  <span style={{fontSize:9,color:C.greyMid,padding:"2px 4px"}}>ID: {t.id}</span>
+                  {isST ? (
+                    <span style={{fontSize:9,fontWeight:700,color:"#8E44AD",background:"#F9F0FF",padding:"2px 7px"}}>⭐ ST</span>
+                  ) : (
+                    <>
+                      <span style={{fontSize:9,fontWeight:700,color:grp?.color,background:`${grp?.color}18`,padding:"2px 7px"}}>{grp?.label}</span>
+                      <span style={{fontSize:9,color:C.greyMid,padding:"2px 4px"}}>{t.duration}</span>
+                      <span style={{fontSize:9,color:C.greyMid,padding:"2px 4px"}}>ID: {t.id}</span>
+                    </>
+                  )}
                 </div>
-                <button onClick={() => downloadICS(s, t)}
-                  title="Dodaj do kalendarza (.ics)"
-                  style={{background:"#F0F7FF",border:"1px solid #0072C6",borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:16,lineHeight:1,flexShrink:0}}>
-                  📅
-                </button>
+                {!isST && (
+                  <button onClick={() => downloadICS(s, t)}
+                    title="Dodaj do kalendarza (.ics)"
+                    style={{background:"#F0F7FF",border:"1px solid #0072C6",borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:16,lineHeight:1,flexShrink:0}}>
+                    📅
+                  </button>
+                )}
               </div>
             </div>
           );
