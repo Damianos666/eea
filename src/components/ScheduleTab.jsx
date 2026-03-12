@@ -38,15 +38,13 @@ function downloadICS(s, t) {
 }
 
 
-export function ScheduleTab({ activeGroups, token, trainerNum }) {
+export function ScheduleTab({ activeGroups, token }) {
   const T = useT();
   const [scheduled, setScheduled]   = useState([]);
   const [loading,   setLoading]     = useState(true);
   const [selected,  setSelected]    = useState(null);   // "YYYY-MM-DD" or null
   const [viewYear,  setViewYear]    = useState(new Date().getFullYear());
   const [viewMonth, setViewMonth]   = useState(new Date().getMonth());  // 0-11
-  const isTrainer = trainerNum != null;
-  const [activeTrainers, setActiveTrainers] = useState(trainerNum ? [Number(trainerNum)] : [1,2,3,4]);
 
   // ── Pobierz harmonogram z bazy ──────────────────────────────────────────
   useEffect(() => {
@@ -59,7 +57,8 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
         const todayStr = toISO(new Date());
         setScheduled(all.filter(s =>
           (s.end_date || s.date) >= todayStr &&
-          !s.is_hidden
+          !s.is_hidden &&
+          !s.is_outgoing
         ));
       } catch { setScheduled([]); }
       finally { setLoading(false); }
@@ -67,13 +66,11 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
     load();
   }, [token]);
 
-  // ── Filtruj wg aktywnych grup i trenera ────────────────────────────────
+  // ── Filtruj wg aktywnych grup ────────────────────────────────────────────
   const visible = useMemo(() => scheduled.filter(s => {
     const t = TRAININGS.find(t => t.id === s.training_id);
-    const groupOk = (s.training_id === "ST") ? true : (t && activeGroups.includes(t.group));
-    const trainerOk = !isTrainer || activeTrainers.length === 0 || activeTrainers.includes(Number(s.trainer_id));
-    return groupOk && trainerOk;
-  }), [scheduled, activeGroups, isTrainer, activeTrainers]);
+    return (s.training_id === "ST") ? true : (t && activeGroups.includes(t.group));
+  }), [scheduled, activeGroups]);
 
   // ── Zestaw dat z szkoleniami (tylko widoczne) ───────────────────────────
   const datesWithTrainings = useMemo(() => {
@@ -197,22 +194,6 @@ export function ScheduleTab({ activeGroups, token, trainerNum }) {
           </div>
         </div>
 
-        {/* Filtry trenerów — tylko dla kont trenerów */}
-        {isTrainer && (
-          <div style={{display:"flex",gap:6,marginTop:10,paddingTop:10,borderTop:`1px solid ${C.grey}`}}>
-            {[1,2,3,4].map(n => {
-              const active = activeTrainers.includes(n);
-              return (
-                <button key={n} onClick={() => setActiveTrainers(prev =>
-                  active ? prev.filter(x => x !== n) : [...prev, n]
-                )}
-                  style={{flex:1,padding:"8px 0",background:active?C.green:C.white,color:active?C.white:C.greyDk,border:`1.5px solid ${active?C.green:C.grey}`,borderRadius:6,fontSize:15,fontWeight:700,cursor:"pointer"}}>
-                  {n}
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* ── LISTA SZKOLEŃ ── */}

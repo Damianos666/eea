@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { C, LVL_COLOR, GROUPS } from "../lib/constants";
 import { TRAININGS } from "../data/trainings";
 import { parseCode, calcProgress } from "../lib/helpers";
@@ -25,6 +25,14 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
   const [confirmName, setConfirmName] = useState("");
 
   const progress = calcProgress(completed, activeGroups);
+
+  // Memoizacja deduplication — przelicza się tylko gdy zmienia się completed
+  const uniqueCompleted = useMemo(
+    () => Object.values(
+      completed.reduce((acc, c) => { acc[c.training.id] = c; return acc; }, {})
+    ),
+    [completed]
+  );
 
   function verify() {
     const parsed = parseCode(code);
@@ -235,11 +243,7 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
       )}
       <div style={{background:C.white,margin:"0 12px 12px",boxShadow:"0 1px 3px rgba(0,0,0,.07)"}}>
         <SecTitle>{T.completed_trainings}</SecTitle>
-        {(() => {
-          const unique = Object.values(
-            completed.reduce((acc, c) => { acc[c.training.id] = c; return acc; }, {})
-          );
-          return unique.map((c,i) => (
+        {uniqueCompleted.map((c,i) => (
             <div key={i} style={{display:"flex",alignItems:"center",gap:14,padding:"13px 18px",borderTop:i>0?`1px solid ${C.grey}`:"none"}}>
               <div style={{width:4,alignSelf:"stretch",background:LVL_COLOR[c.training.level],borderRadius:2,flexShrink:0}}/>
               <div style={{flex:1}}>
@@ -248,8 +252,7 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
               </div>
               <button style={{background:"none",border:`1px solid ${C.grey}`,color:C.greyDk,padding:"7px 12px",fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} onClick={() => setCertEntry(c)}>{T.certificate}</button>
             </div>
-          ));
-        })()}
+          ))}
       </div>
     </div>
   );

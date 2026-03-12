@@ -83,39 +83,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- Fix: iOS PWA viewport zoom nie resetuje się po powrocie portrait → landscape → portrait -->
-    <script>
-      (function () {
-        var VIEWPORT = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
-        var VIEWPORT_LOCKED = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover';
-
-        function resetViewportZoom() {
-          var meta = document.querySelector('meta[name="viewport"]');
-          if (!meta) return;
-          // Chwilowo blokujemy zoom → przeglądarka resetuje skalę
-          meta.setAttribute('content', VIEWPORT_LOCKED);
-          setTimeout(function () {
-            // Przywracamy normalny viewport (pinch-zoom znów działa)
-            meta.setAttribute('content', VIEWPORT);
-          }, 300);
-        }
-
-        // Odpalamy reset PO zakończeniu animacji obrotu (300 ms bufor)
-        window.addEventListener('orientationchange', function () {
-          setTimeout(resetViewportZoom, 200);
-        });
-
-        // Fallback dla przeglądarek bez orientationchange (np. Chrome Desktop resize)
-        var lastOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
-        window.addEventListener('resize', function () {
-          var current = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
-          if (current !== lastOrientation) {
-            lastOrientation = current;
-            resetViewportZoom();
-          }
-        });
-      })();
-    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

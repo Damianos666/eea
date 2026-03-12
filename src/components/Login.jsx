@@ -13,8 +13,8 @@ export function LoginScreen({ onLogin }) {
     <div className="app-container" style={{height:"100%",display:"flex",flexDirection:"column",fontFamily:"'Helvetica Neue',Helvetica,Arial,sans-serif",overflow:"hidden",background:C.greyBg}}>
       <Header/>
       <div style={{background:C.greyBanner,borderBottom:`1px solid #D0D3D6`,padding:"11px 20px",textAlign:"center"}}>
-        <strong style={{display:"block",fontSize:15,color:C.black,marginBottom:2}}>{T.login_title}</strong>
-        <span style={{fontSize:13,color:C.greyDk}}>{T.login_subtitle}</span>
+        <strong style={{display:"block",fontSize:15,color:C.black,marginBottom:2}}>ENGEL Expert Academy</strong>
+        <span style={{fontSize:13,color:C.greyDk}}>by Damian Świderski</span>
       </div>
       <div className="app-content" style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px 24px 40px",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         <ClipboardSvg/>
@@ -96,12 +96,6 @@ export function AuthForm({ mode, setMode, onLogin }) {
       const result = await auth.signUp(email.trim().toLowerCase(), pass);
       if (!result.user) throw new Error("Błąd tworzenia konta");
 
-      const existing = await db.get(result.access_token, "profiles", `id=eq.${result.user.id}&select=id`).catch(() => []);
-      if (existing.length > 0) {
-        setErr("Konto z tym adresem e-mail już istnieje. Zaloguj się lub zresetuj hasło.");
-        return;
-      }
-
       const emailName = email.trim().split("@")[0];
       await db.insert(result.access_token, "profiles", {
         id: result.user.id,
@@ -112,13 +106,13 @@ export function AuthForm({ mode, setMode, onLogin }) {
         active_groups: ["tech","ur","maszyny"],
         notif_reminder: true,
         notif_cert: true,
-      });
+      }).catch(() => {}); // profil może już istnieć — ignoruj duplikat
 
       setInfo("Konto utworzone! Możesz się teraz zalogować.");
       sw("login"); setEmail(email); setPass("");
     } catch(e) {
       const msg = e.message || "";
-      if (msg.includes("23505") || msg.includes("duplicate") || msg.includes("already registered")) {
+      if (msg.includes("already registered") || msg.includes("User already registered")) {
         setErr("Konto z tym adresem e-mail już istnieje. Zaloguj się lub zresetuj hasło.");
       } else {
         setErr(msg || "Błąd rejestracji");

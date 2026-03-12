@@ -7,9 +7,11 @@ import { Spinner, SecTitle, Toggle } from "./SharedUI";
 
 const LOGO_URL = "/logo.png";
 
+// Stała poza komponentem — nie tworzy nowej tablicy przy każdym renderze
+const ADMIN_TABS = [["Terminarz","📅"],["Wiadomości","✉"],["Edytor szkoleń","📋"],["Generator kodów","🔑"]];
+
 export function AdminPanel({ user, onLogout }) {
   const [tab, setTab] = useState(0);
-  const adminTabs = [["Terminarz","📅"],["Wiadomości","✉"],["Edytor szkoleń","📋"],["Generator kodów","🔑"]];
 
   return (
     <div className="app-container" style={{height:"100%",display:"flex",flexDirection:"column",fontFamily:"'Helvetica Neue',Helvetica,Arial,sans-serif",background:C.greyBg,overflow:"hidden"}}>
@@ -23,7 +25,7 @@ export function AdminPanel({ user, onLogout }) {
       <div style={{height:3,background:C.green,flexShrink:0}}/>
 
       <div style={{display:"flex",background:C.white,borderBottom:`1px solid ${C.grey}`,flexShrink:0}}>
-        {adminTabs.map(([label,icon],i) => (
+        {ADMIN_TABS.map(([label,icon],i) => (
           <button key={i} onClick={() => setTab(i)}
             style={{flex:1,background:"none",border:"none",borderBottom:`3px solid ${tab===i?C.green:"transparent"}`,padding:"10px 4px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer"}}>
             <span style={{fontSize:16,color:tab===i?C.black:C.greyMid}}>{icon}</span>
@@ -43,11 +45,11 @@ export function AdminPanel({ user, onLogout }) {
 }
 
 /* ── Admin: Generator kodów ── */
-export function AdminCodeGen() {
+export function AdminCodeGen({ defaultTrainer }) {
   const [mode,        setMode]        = useState("normal"); // "normal" | "special"
   const [selGroup,    setSelGroup]    = useState(GROUPS[0].id);
   const [selTraining, setSelTraining] = useState(TRAININGS.find(t=>t.group===GROUPS[0].id)?.id || TRAININGS[0].id);
-  const [selTrainer,  setSelTrainer]  = useState(1);
+  const [selTrainer,  setSelTrainer]  = useState(defaultTrainer ? Number(defaultTrainer) : 1);
   const [copied,      setCopied]      = useState(false);
 
   function handleGroupChange(gid) {
@@ -479,6 +481,7 @@ export function AdminSchedule({ token }) {
   const [stName,       setStName]       = useState("");
   const [stDays,       setStDays]       = useState(2);
   const [isHidden,     setIsHidden]     = useState(false);
+  const [isOutgoing,   setIsOutgoing]   = useState(false);
   const [notes,        setNotes]        = useState("");
   const [partCount,    setPartCount]    = useState("");
 
@@ -509,22 +512,16 @@ export function AdminSchedule({ token }) {
     const ro = new ResizeObserver(() => recalc());
     ro.observe(timelineRef.current);
 
-    // orientationchange — fallback dla Safari iOS i PWA
-    // Wiele timeoutów bo różne przeglądarki raportują wymiary w różnym momencie
-    function onOrient() {
-      setTimeout(recalc, 50);
-      setTimeout(recalc, 150);
-      setTimeout(recalc, 400);
-    }
+    // orientationchange — fallback dla Safari iOS
+    // setTimeout bo Safari raportuje stary wymiar tuż po zdarzeniu
+    function onOrient() { setTimeout(recalc, 150); }
     window.addEventListener("orientationchange", onOrient);
-    window.addEventListener("resize", recalc);
 
     recalc(); // uruchom od razu
 
     return () => {
       ro.disconnect();
       window.removeEventListener("orientationchange", onOrient);
-      window.removeEventListener("resize", recalc);
     };
   }, [daysInMonth, viewYear, viewMonth]);
 
@@ -561,7 +558,7 @@ export function AdminSchedule({ token }) {
     setSelGroup(firstGroup);
     setSelTraining(TRAININGS.find(t=>t.group===firstGroup)?.id || TRAININGS[0].id);
     setStName(""); setStDays(2);
-    setIsHidden(false); setNotes(""); setPartCount("");
+    setIsHidden(false); setIsOutgoing(false); setNotes(""); setPartCount("");
   }
 
   function openNewForm(date, trainerId) {
@@ -581,6 +578,7 @@ export function AdminSchedule({ token }) {
     setSelTraining(isST ? (TRAININGS.find(t=>t.group===GROUPS[0].id)?.id || TRAININGS[0].id) : entry.training_id);
     setStName(entry.custom_name || ""); setStDays(entry.duration_days || 2);
     setIsHidden(entry.is_hidden || false);
+    setIsOutgoing(entry.is_outgoing || false);
     setNotes(entry.notes || "");
     setPartCount(entry.participants_count != null ? String(entry.participants_count) : "");
     setMsg(null);
@@ -661,9 +659,8 @@ export function AdminSchedule({ token }) {
         custom_name: trainingMode === "ST" ? stName.trim() : null,
         duration_days: days,
         is_hidden: isHidden,
+        is_outgoing: isOutgoing,
         notes: notes.trim(),
-        participants_count: partCount !== "" ? parseInt(partCount) : null,
-        status: "active",
       };
       await db.insert(token, "scheduled_trainings", payload);
       setMsg({ok:true,text:"✓ Dodano szkolenie do planerza!"});
@@ -686,6 +683,7 @@ export function AdminSchedule({ token }) {
         custom_name: trainingMode === "ST" ? stName.trim() : null,
         duration_days: days,
         is_hidden: isHidden,
+        is_outgoing: isOutgoing,
         notes: notes.trim(),
         participants_count: partVal,
       };
@@ -698,6 +696,7 @@ export function AdminSchedule({ token }) {
         ...x, ...payload,
         participants_count: partVal,
         is_hidden: isHidden,
+        is_outgoing: isOutgoing,
       } : x));
       setSaving(false);
       closeForm();
@@ -762,6 +761,7 @@ export function AdminSchedule({ token }) {
           startDay, endDay, color, title, trainerId: s.trainer_id, id: s.id,
           isPreview: !!s.__preview, isPlanned,
           isHidden: s.is_hidden || false,
+          isOutgoing: s.is_outgoing || false,
           participantsCount: s.participants_count,
           entry: s,
           cellW,
@@ -798,7 +798,7 @@ export function AdminSchedule({ token }) {
         onTouchEnd={e => handleBarPressEnd(bar, e)}
         onTouchMove={() => handleBarPressCancel(bar.id)}
         onContextMenu={e => e.preventDefault()}
-        title={`${bar.title}${bar.isPlanned?" [planowane]":""}${bar.isHidden?" [ukryte]":""}\nTap=edytuj · 2×tap=planned · przytrzymaj=usuń`}
+        title={`${bar.title}${bar.isPlanned?" [planowane]":""}${bar.isHidden?" [ukryte]":""}${bar.isOutgoing?" [wyjazdowe]":""}\nTap=edytuj · 2×tap=planned · przytrzymaj=usuń`}
         style={{
           position:"absolute",left:(bar.startDay-1)*cw,top:4,height:22,width:w,zIndex:2,
           background:bar.color,borderRadius:3,display:"flex",alignItems:"center",
@@ -808,6 +808,9 @@ export function AdminSchedule({ token }) {
         }}>
         {bar.isHidden && (
           <span style={{flexShrink:0,fontSize:7,color:"rgba(255,255,255,.85)",lineHeight:1}}>🔒</span>
+        )}
+        {bar.isOutgoing && !bar.isHidden && (
+          <span style={{flexShrink:0,fontSize:7,color:"rgba(255,255,255,.85)",lineHeight:1}}>✈️</span>
         )}
         <span style={{fontSize:8,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",flex:1}}>
           {bar.title}{bar.isPlanned?" ···":""}
@@ -979,12 +982,21 @@ export function AdminSchedule({ token }) {
             />
           </div>
 
-          {/* HIDDEN + LICZBA UCZESTNIKÓW — jeden wiersz */}
+          {/* HIDDEN + WYJAZDOWE + LICZBA UCZESTNIKÓW — jeden wiersz */}
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-              <input type="checkbox" checked={isHidden} onChange={e=>setIsHidden(e.target.checked)}
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}
+              title="Ukryte — niewidoczne dla klientów">
+              <input type="checkbox" checked={isHidden}
+                onChange={e => { setIsHidden(e.target.checked); if (e.target.checked) setIsOutgoing(false); }}
                 style={{width:16,height:16,cursor:"pointer",accentColor:C.amber}}/>
               <span style={{fontSize:16}}>🔒</span>
+            </label>
+            <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}
+              title="Wyjazdowe — widoczne tylko dla trenerów">
+              <input type="checkbox" checked={isOutgoing}
+                onChange={e => { setIsOutgoing(e.target.checked); if (e.target.checked) setIsHidden(false); }}
+                style={{width:16,height:16,cursor:"pointer",accentColor:"#2980B9"}}/>
+              <span style={{fontSize:16}}>✈️</span>
             </label>
             <div style={{flex:1}}/>
             <span style={{fontSize:11,fontWeight:700,color:C.greyMid,letterSpacing:1,textTransform:"uppercase"}}>Liczba uczest.</span>

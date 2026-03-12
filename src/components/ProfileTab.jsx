@@ -6,7 +6,7 @@ import { calcProgress } from "../lib/helpers";
 import { Toggle, SecTitle } from "./SharedUI";
 import { useT, useLang } from "../lib/LangContext";
 
-export function ProfileTab({ user, setUser, completed, activeGroups, setActiveGroups, onLogout }) {
+export function ProfileTab({ user, setUser, completed, activeGroups, setActiveGroups, onLogout, trainerView, setTrainerView }) {
   const T = useT();
   const { lang, switchLang } = useLang();
   const [editName,  setEditName]  = useState(user.displayName);
@@ -116,6 +116,22 @@ export function ProfileTab({ user, setUser, completed, activeGroups, setActiveGr
               </div>
               <div style={{height:4,background:C.grey}}><div style={{height:"100%",background:C.green,width:`${progress.pct}%`,transition:"width .5s"}}/></div>
               <div style={{fontSize:11,color:C.greyMid,marginTop:4}}>{progress.done} / {progress.total} szkoleń zaliczonych</div>
+            </div>
+          )}
+
+          {/* Panel Klienta toggle — tylko dla kont trenerów */}
+          {user.trainer_id != null && trainerView !== undefined && (
+            <div style={{padding:"13px 18px",borderTop:`1px solid ${C.grey}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:3}}>
+                  <span style={{width:10,height:10,borderRadius:"50%",background:trainerView==="client"?C.green:C.grey,flexShrink:0,display:"inline-block"}}/>
+                  <span style={{fontSize:14,fontWeight:trainerView==="client"?700:400,color:trainerView==="client"?C.black:C.greyMid}}>Panel Klienta</span>
+                </div>
+                <div style={{fontSize:11,color:C.greyMid,paddingLeft:20}}>
+                  {trainerView==="client" ? "Widok aktywny" : "Widok trenera aktywny"}
+                </div>
+              </div>
+              <Toggle value={trainerView==="client"} color={C.green} onChange={() => setTrainerView && setTrainerView(trainerView==="client" ? "trainer" : "client")}/>
             </div>
           )}
         </div>

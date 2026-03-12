@@ -27,6 +27,10 @@ export function todayEncoded() {
   return (dd+mm+yy).split("").map(c => String((parseInt(c)+3)%10)).join("");
 }
 
+// Sortowanie malejąco po długości skrótu — wykonane raz przy imporcie modułu,
+// nie przy każdym wywołaniu parseCode.
+const SORTED_TRAININGS = [...TRAININGS].sort((a, b) => b.short.length - a.short.length);
+
 export function parseCode(input) {
   let raw = input.trim().toUpperCase();
   if (raw.length < 8) return null;
@@ -54,9 +58,8 @@ export function parseCode(input) {
     };
   }
 
-  // Zwykłe szkolenie — sortuj malejąco po długości skrótu
-  const sorted = [...TRAININGS].sort((a, b) => b.short.length - a.short.length);
-  for (const t of sorted) {
+  // Zwykłe szkolenie — używamy wstępnie posortowanej tablicy
+  for (const t of SORTED_TRAININGS) {
     if (raw.startsWith(t.short.toUpperCase())) {
       const rest = raw.slice(t.short.length);
       if (!/^\d{7}$/.test(rest)) return null;
