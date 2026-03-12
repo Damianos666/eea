@@ -37,6 +37,20 @@
         }
       }
 
+      /* Landscape na telefonie — wypełnij cały ekran */
+      @media (max-height: 500px) and (orientation: landscape) {
+        #root {
+          align-items: stretch;
+          justify-content: stretch;
+        }
+        .app-container {
+          width: 100% !important;
+          height: 100% !important;
+          max-height: none !important;
+          box-shadow: none !important;
+        }
+      }
+
       @media (max-width: 768px) {
         html, body {
           height: 100%;
