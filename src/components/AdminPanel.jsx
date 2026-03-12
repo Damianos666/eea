@@ -497,19 +497,35 @@ export function AdminSchedule({ token }) {
 
   useEffect(() => {
     if (!timelineRef.current) return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const available = entry.contentRect.width - 46;
-        const natural = daysInMonth * 20;
-        setCellW(available > natural ? available / daysInMonth : 20);
-      }
-    });
+
+    function recalc() {
+      if (!timelineRef.current) return;
+      const available = timelineRef.current.clientWidth - 46;
+      const natural = daysInMonth * 20;
+      setCellW(available > natural ? available / daysInMonth : 20);
+    }
+
+    // ResizeObserver — Chrome, Android, nowoczesne przeglądarki
+    const ro = new ResizeObserver(() => recalc());
     ro.observe(timelineRef.current);
-    // Też uruchom od razu
-    const available = timelineRef.current.clientWidth - 46;
-    const natural = daysInMonth * 20;
-    setCellW(available > natural ? available / daysInMonth : 20);
-    return () => ro.disconnect();
+
+    // orientationchange — fallback dla Safari iOS i PWA
+    // Wiele timeoutów bo różne przeglądarki raportują wymiary w różnym momencie
+    function onOrient() {
+      setTimeout(recalc, 50);
+      setTimeout(recalc, 150);
+      setTimeout(recalc, 400);
+    }
+    window.addEventListener("orientationchange", onOrient);
+    window.addEventListener("resize", recalc);
+
+    recalc(); // uruchom od razu
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("orientationchange", onOrient);
+      window.removeEventListener("resize", recalc);
+    };
   }, [daysInMonth, viewYear, viewMonth]);
 
   useEffect(() => { loadScheduled(); }, []);
