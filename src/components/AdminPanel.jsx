@@ -8,7 +8,7 @@ import { Spinner, SecTitle, Toggle } from "./SharedUI";
 const LOGO_URL = "/logo.png";
 
 // Stała poza komponentem — nie tworzy nowej tablicy przy każdym renderze
-const ADMIN_TABS = [["Terminarz","📅"],["Wiadomości","✉"],["Edytor szkoleń","📋"],["Generator kodów","🔑"]];
+const ADMIN_TABS = [["Terminarz","📅"],["Wiadomości","✉"],["Edytor szkoleń","📋"]];
 
 export function AdminPanel({ user, onLogout }) {
   const [tab, setTab] = useState(0);
@@ -18,7 +18,7 @@ export function AdminPanel({ user, onLogout }) {
       <div style={{background:C.darkHdr,paddingTop:"calc(12px + env(safe-area-inset-top, 0px))",paddingBottom:"12px",paddingLeft:"16px",paddingRight:"16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxSizing:"border-box"}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <img src={LOGO_URL} alt="ENGEL" style={{height:22,mixBlendMode:"screen"}}/>
-          <span style={{color:C.green,fontSize:11,fontWeight:700,letterSpacing:2}}>Ania Turzyńska</span>
+          <span style={{color:C.green,fontSize:11,fontWeight:700,letterSpacing:2}}>ADMIN</span>
         </div>
         <button onClick={onLogout} style={{background:"none",border:`1px solid rgba(255,255,255,.3)`,color:"#ccc",padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}}>Wyloguj</button>
       </div>
@@ -38,7 +38,6 @@ export function AdminPanel({ user, onLogout }) {
         {tab===0 && <AdminSchedule token={user.accessToken}/>}
         {tab===1 && <AdminMessages token={user.accessToken}/>}
         {tab===2 && <AdminTrainings token={user.accessToken}/>}
-        {tab===3 && <AdminCodeGen/>}
       </div>
     </div>
   );
