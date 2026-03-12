@@ -503,8 +503,8 @@ export function AdminSchedule({ token }) {
     function recalc() {
       if (!timelineRef.current) return;
       const available = timelineRef.current.clientWidth - 46;
-      const natural = daysInMonth * 20;
-      setCellW(available > natural ? available / daysInMonth : 20);
+      // Liczba dni widocznych w oknie bez scrollowania — zmień 12 na inną wartość aby dostosować szerokość komórek
+      setCellW(available / 8);
     }
 
     // ResizeObserver — Chrome, Android, nowoczesne przeglądarki
