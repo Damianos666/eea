@@ -1136,7 +1136,7 @@ export function AdminSchedule({ token }) {
 
 export function AdminQuiz({ token }) {
   const [quizzes,      setQuizzes]      = useState([]);
-  const [selQuiz,      setSelQuiz]      = useState(null);   // null = lista quizów
+  const [selQuiz,      setSelQuiz]      = useState(null);
   const [questions,    setQuestions]    = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [saving,       setSaving]       = useState(false);
@@ -1145,7 +1145,7 @@ export function AdminQuiz({ token }) {
 
   // Formularz nowego quizu
   const [showQuizForm, setShowQuizForm] = useState(false);
-  const [qzMode,       setQzMode]       = useState("training"); // "training"|"custom"
+  const [qzMode,       setQzMode]       = useState("training");
   const [qzTraining,   setQzTraining]   = useState(TRAININGS[0].id);
   const [qzCustom,     setQzCustom]     = useState("");
 
@@ -1158,12 +1158,28 @@ export function AdminQuiz({ token }) {
   const [fC,  setFC]  = useState("");
   const [fAns,setFAns]= useState("a");
 
-  // ── Załaduj quizy z liczbą pytań ──────────────────────────────────────────
+  // Potwierdzenie usunięcia: { type:"quiz"|"question", item }
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+
+  // Long-press
+  const pressTimer = useRef(null);
+  const HOLD_MS = 600;
+
+  function startHold(cb) {
+    pressTimer.current = setTimeout(() => {
+      if (navigator.vibrate) navigator.vibrate(80);
+      cb();
+    }, HOLD_MS);
+  }
+  function cancelHold() {
+    clearTimeout(pressTimer.current);
+  }
+
+  // ── Załaduj quizy ────────────────────────────────────────────────────────
   async function loadQuizzes() {
     setLoading(true); setErr("");
     try {
       const data = await db.get(token, "quizzes", "order=created_at.asc&select=*");
-      // Pobierz liczby pytań dla każdego quizu
       const counts = await db.get(token, "quiz_questions", "select=quiz_id");
       const countMap = {};
       counts.forEach(q => { countMap[q.quiz_id] = (countMap[q.quiz_id] || 0) + 1; });
@@ -1174,7 +1190,6 @@ export function AdminQuiz({ token }) {
 
   useEffect(() => { loadQuizzes(); }, []);
 
-  // ── Załaduj pytania wybranego quizu ───────────────────────────────────────
   async function loadQuestions(quizId) {
     setLoading(true);
     try {
@@ -1184,21 +1199,10 @@ export function AdminQuiz({ token }) {
     finally { setLoading(false); }
   }
 
-  function openQuiz(qz) {
-    setSelQuiz(qz);
-    setErr("");
-    setShowQForm(false);
-    loadQuestions(qz.id);
-  }
+  function openQuiz(qz) { setSelQuiz(qz); setErr(""); setShowQForm(false); loadQuestions(qz.id); }
+  function backToList() { setSelQuiz(null); setShowQForm(false); setEditingQ(null); loadQuizzes(); }
 
-  function backToList() {
-    setSelQuiz(null);
-    setShowQForm(false);
-    setEditingQ(null);
-    loadQuizzes();
-  }
-
-  // ── Utwórz nowy quiz ──────────────────────────────────────────────────────
+  // ── Utwórz quiz ───────────────────────────────────────────────────────────
   async function createQuiz() {
     const title = qzMode === "training"
       ? (TRAININGS.find(t => t.id === qzTraining)?.title || qzTraining)
@@ -1208,35 +1212,33 @@ export function AdminQuiz({ token }) {
     setSaving(true); setErr("");
     try {
       const res = await db.insert(token, "quizzes", { title, training_id });
-      setShowQuizForm(false);
-      setQzCustom("");
+      setShowQuizForm(false); setQzCustom("");
       await loadQuizzes();
-      // Od razu wejdź do nowego quizu
       if (res?.[0]) openQuiz({ ...res[0], questionCount: 0 });
     } catch(e) { setErr("Błąd: " + e.message); }
     finally { setSaving(false); }
   }
 
-  // ── Usuń quiz ─────────────────────────────────────────────────────────────
-  async function deleteQuiz(qzId) {
-    if (!window.confirm("Usuń quiz wraz ze wszystkimi pytaniami?")) return;
-    setDeleting(qzId);
+  // ── Usuń (po potwierdzeniu) ───────────────────────────────────────────────
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(deleteConfirm.item.id);
+    setDeleteConfirm(null);
     try {
-      await db.remove(token, "quizzes", `id=eq.${qzId}`);
-      setQuizzes(p => p.filter(q => q.id !== qzId));
-    } catch(e) { alert("Błąd: " + e.message); }
+      if (deleteConfirm.type === "quiz") {
+        await db.remove(token, "quizzes", `id=eq.${deleteConfirm.item.id}`);
+        setQuizzes(p => p.filter(q => q.id !== deleteConfirm.item.id));
+      } else {
+        await db.remove(token, "quiz_questions", `id=eq.${deleteConfirm.item.id}`);
+        setQuestions(p => p.filter(q => q.id !== deleteConfirm.item.id));
+      }
+    } catch(e) { setErr("Błąd: " + e.message); }
     finally { setDeleting(null); }
   }
 
   // ── Formularz pytania ─────────────────────────────────────────────────────
-  function openNewQ() {
-    setEditingQ(null); setFQ(""); setFA(""); setFB(""); setFC(""); setFAns("a");
-    setShowQForm(true); setErr("");
-  }
-  function openEditQ(q) {
-    setEditingQ(q); setFQ(q.question); setFA(q.answer_a); setFB(q.answer_b); setFC(q.answer_c); setFAns(q.correct);
-    setShowQForm(true); setErr("");
-  }
+  function openNewQ() { setEditingQ(null); setFQ(""); setFA(""); setFB(""); setFC(""); setFAns("a"); setShowQForm(true); setErr(""); }
+  function openEditQ(q) { setEditingQ(q); setFQ(q.question); setFA(q.answer_a); setFB(q.answer_b); setFC(q.answer_c); setFAns(q.correct); setShowQForm(true); setErr(""); }
   async function saveQ() {
     if (!fQ.trim()||!fA.trim()||!fB.trim()||!fC.trim()) { setErr("Wypełnij wszystkie pola."); return; }
     setSaving(true); setErr("");
@@ -1249,20 +1251,48 @@ export function AdminQuiz({ token }) {
     } catch(e) { setErr("Błąd zapisu: " + e.message); }
     finally { setSaving(false); }
   }
-  async function deleteQ(id) {
-    setDeleting(id);
-    try {
-      await db.remove(token, "quiz_questions", `id=eq.${id}`);
-      setQuestions(p => p.filter(q => q.id !== id));
-    } catch(e) { alert("Błąd: " + e.message); }
-    finally { setDeleting(null); }
-  }
 
   const inpStyle = { width:"100%", boxSizing:"border-box", border:`1px solid ${C.grey}`, padding:"9px 12px", fontSize:13, marginBottom:10, borderRadius:4 };
+
+  // ── Modal potwierdzenia usunięcia ─────────────────────────────────────────
+  const deleteModal = deleteConfirm && (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,padding:16,fontFamily:"'Helvetica Neue',Helvetica,Arial,sans-serif"}}>
+      <div style={{background:C.white,width:"100%",maxWidth:380,borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,.35)",overflow:"hidden"}}>
+        <div style={{background:C.darkHdr,padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span style={{color:C.white,fontSize:13,fontWeight:700,letterSpacing:1}}>
+            {deleteConfirm.type === "quiz" ? "USUŃ QUIZ" : "USUŃ PYTANIE"}
+          </span>
+          <button onClick={() => setDeleteConfirm(null)} style={{background:"none",border:"none",color:"#fff",fontSize:18,cursor:"pointer",opacity:.7}}>✕</button>
+        </div>
+        <div style={{height:3,background:C.red}}/>
+        <div style={{padding:20,display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{fontSize:13,color:C.greyDk}}>
+            {deleteConfirm.type === "quiz"
+              ? "Czy na pewno chcesz usunąć ten quiz? Wszystkie pytania zostaną usunięte."
+              : "Czy na pewno chcesz usunąć to pytanie?"}
+          </div>
+          <div style={{background:C.greyBg,padding:"10px 14px",borderLeft:`3px solid ${C.red}`,fontSize:13,fontWeight:600,color:C.black}}>
+            {deleteConfirm.type === "quiz" ? deleteConfirm.item.title : deleteConfirm.item.question}
+          </div>
+        </div>
+        <div style={{padding:"0 20px 20px",display:"flex",gap:10}}>
+          <button onClick={() => setDeleteConfirm(null)}
+            style={{flex:1,padding:"12px",border:`1px solid ${C.grey}`,background:C.white,fontSize:13,fontWeight:600,cursor:"pointer",borderRadius:6,color:C.greyDk}}>
+            Anuluj
+          </button>
+          <button onClick={confirmDelete}
+            style={{flex:1,padding:"12px",border:"none",background:C.red,fontSize:13,fontWeight:700,cursor:"pointer",borderRadius:6,color:C.white}}>
+            Usuń
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   /* ════ WIDOK LISTY QUIZÓW ════ */
   if (!selQuiz) return (
     <div style={{padding:12,display:"flex",flexDirection:"column",gap:10}}>
+      {deleteModal}
       {err && <div style={{background:"#FDEDEC",border:`1px solid ${C.red}`,padding:"10px 14px",fontSize:13,color:C.red,borderRadius:4}}>{err}</div>}
 
       <button onClick={() => { setShowQuizForm(p => !p); setErr(""); }}
@@ -1270,7 +1300,6 @@ export function AdminQuiz({ token }) {
         {showQuizForm ? "Anuluj" : "+ Nowy quiz"}
       </button>
 
-      {/* Formularz nowego quizu */}
       {showQuizForm && (
         <div style={{background:C.white,padding:16,borderRadius:8,boxShadow:"0 2px 8px rgba(0,0,0,.1)"}}>
           <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>Nowy quiz</div>
@@ -1283,7 +1312,6 @@ export function AdminQuiz({ token }) {
               </button>
             ))}
           </div>
-
           {qzMode === "training" ? (
             <select value={qzTraining} onChange={e => setQzTraining(e.target.value)} style={inpStyle}>
               {TRAININGS.map(t => (
@@ -1294,7 +1322,6 @@ export function AdminQuiz({ token }) {
             <input value={qzCustom} onChange={e => setQzCustom(e.target.value)}
               placeholder="Nazwa quizu (np. Bezpieczeństwo pracy)" style={inpStyle}/>
           )}
-
           {err && <div style={{color:C.red,fontSize:12,marginBottom:8}}>{err}</div>}
           <button onClick={createQuiz} disabled={saving}
             style={{width:"100%",background:C.black,border:"none",color:C.white,padding:11,fontSize:13,fontWeight:700,cursor:"pointer",borderRadius:4}}>
@@ -1304,14 +1331,20 @@ export function AdminQuiz({ token }) {
       )}
 
       {loading && <div style={{textAlign:"center",padding:32}}><Spinner/></div>}
-
       {!loading && !quizzes.length && (
         <div style={{textAlign:"center",color:C.greyMid,padding:32,fontSize:13}}>Brak quizów. Utwórz pierwszy.</div>
       )}
+      <div style={{fontSize:11,color:C.greyMid,textAlign:"center",padding:"4px 0"}}>Przytrzymaj quiz aby usunąć</div>
 
       {quizzes.map(qz => (
-        <div key={qz.id} style={{background:C.white,borderRadius:8,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,.06)",display:"flex",alignItems:"center",gap:10}}>
-          <div style={{flex:1,cursor:"pointer",minWidth:0}} onClick={() => openQuiz(qz)}>
+        <div key={qz.id}
+          onMouseDown={() => startHold(() => setDeleteConfirm({ type:"quiz", item:qz }))}
+          onMouseUp={cancelHold} onMouseLeave={cancelHold}
+          onTouchStart={() => startHold(() => setDeleteConfirm({ type:"quiz", item:qz }))}
+          onTouchEnd={cancelHold} onTouchCancel={cancelHold}
+          style={{background:deleting===qz.id?"#FDEDEC":C.white,borderRadius:8,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,.06)",display:"flex",alignItems:"center",gap:10,userSelect:"none",cursor:"pointer",transition:"background .15s"}}
+        >
+          <div style={{flex:1,minWidth:0}} onClick={() => openQuiz(qz)}>
             <div style={{fontSize:13,fontWeight:700,color:C.black,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               {qz.title}
             </div>
@@ -1324,19 +1357,15 @@ export function AdminQuiz({ token }) {
             style={{background:C.greyBg,border:`1px solid ${C.grey}`,padding:"6px 12px",fontSize:11,fontWeight:700,cursor:"pointer",borderRadius:4,flexShrink:0}}>
             Edytuj →
           </button>
-          <button onClick={() => deleteQuiz(qz.id)} disabled={deleting===qz.id}
-            style={{background:"none",border:`1px solid ${C.red}`,padding:"6px 10px",fontSize:11,cursor:"pointer",borderRadius:4,color:C.red,flexShrink:0}}>
-            {deleting===qz.id?"...":"🗑"}
-          </button>
         </div>
       ))}
     </div>
   );
 
-  /* ════ WIDOK PYTAŃ WYBRANEGO QUIZU ════ */
+  /* ════ WIDOK PYTAŃ ════ */
   return (
     <div style={{padding:12,display:"flex",flexDirection:"column",gap:10}}>
-      {/* Nagłówek */}
+      {deleteModal}
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <button onClick={backToList}
           style={{background:"none",border:`1px solid ${C.grey}`,padding:"6px 10px",fontSize:12,cursor:"pointer",borderRadius:4,flexShrink:0}}>
@@ -1355,7 +1384,6 @@ export function AdminQuiz({ token }) {
         + Dodaj pytanie
       </button>
 
-      {/* Formularz pytania */}
       {showQForm && (
         <div style={{background:C.white,padding:16,borderRadius:8,boxShadow:"0 2px 8px rgba(0,0,0,.1)"}}>
           <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>{editingQ?"Edytuj pytanie":"Nowe pytanie"}</div>
@@ -1392,24 +1420,27 @@ export function AdminQuiz({ token }) {
       {!loading && !questions.length && !showQForm && (
         <div style={{textAlign:"center",color:C.greyMid,padding:32,fontSize:13}}>Brak pytań. Dodaj pierwsze pytanie.</div>
       )}
+      {!loading && questions.length > 0 && (
+        <div style={{fontSize:11,color:C.greyMid,textAlign:"center",padding:"4px 0"}}>Przytrzymaj pytanie aby usunąć</div>
+      )}
 
       {questions.map((q, i) => (
-        <div key={q.id} style={{background:C.white,borderRadius:8,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+        <div key={q.id}
+          onMouseDown={() => startHold(() => setDeleteConfirm({ type:"question", item:q }))}
+          onMouseUp={cancelHold} onMouseLeave={cancelHold}
+          onTouchStart={() => startHold(() => setDeleteConfirm({ type:"question", item:q }))}
+          onTouchEnd={cancelHold} onTouchCancel={cancelHold}
+          style={{background:deleting===q.id?"#FDEDEC":C.white,borderRadius:8,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,.06)",userSelect:"none",transition:"background .15s"}}
+        >
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:6}}>
             <div style={{fontSize:13,fontWeight:600,color:C.black,lineHeight:1.4,flex:1}}>{i+1}. {q.question}</div>
-            <div style={{display:"flex",gap:6,flexShrink:0}}>
-              <button onClick={() => openEditQ(q)} style={{background:"none",border:`1px solid ${C.grey}`,padding:"3px 8px",fontSize:11,cursor:"pointer",borderRadius:3}}>✏️</button>
-              <button onClick={() => deleteQ(q.id)} disabled={deleting===q.id}
-                style={{background:"none",border:`1px solid ${C.red}`,padding:"3px 8px",fontSize:11,cursor:"pointer",borderRadius:3,color:C.red}}>
-                {deleting===q.id?"...":"🗑"}
-              </button>
-            </div>
+            <button onClick={() => openEditQ(q)} style={{background:"none",border:`1px solid ${C.grey}`,padding:"3px 8px",fontSize:11,cursor:"pointer",borderRadius:3,flexShrink:0}}>✏️</button>
           </div>
           {["a","b","c"].map(k => (
             <div key={k} style={{
               fontSize:12,padding:"4px 8px",marginBottom:3,borderRadius:4,
-              background:k===q.correct?"#EAFAF1":C.greyBg,
-              color:k===q.correct?"#1a7a40":C.greyDk,
+              background:k===q.correct?"#F0F7E0":C.greyBg,
+              color:k===q.correct?C.greenDk:C.greyDk,
               fontWeight:k===q.correct?700:400,
               border:k===q.correct?`1px solid ${C.green}`:"none",
             }}>
