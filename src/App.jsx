@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { C, GROUPS, ADMIN_EMAIL } from "./lib/constants";
 import { TRAININGS } from "./data/trainings";
 import { auth, db, session } from "./lib/supabase";
@@ -12,7 +12,7 @@ import { ScheduleTab } from "./components/ScheduleTab";
 import { MessagesTab } from "./components/MessagesTab";
 import { ProfileTab } from "./components/ProfileTab";
 import { TrainerScheduleTab } from "./components/TrainerScheduleTab";
-import { AdminPanel, AdminCodeGen } from "./components/AdminPanel";
+import { AdminPanel, AdminCodeGen, AdminQuiz } from "./components/AdminPanel";
 import { TabBar } from "./components/TabBar";
 
 // Stałe zdefiniowane poza komponentem — nowy obiekt nie powstaje przy każdym renderze
@@ -20,6 +20,7 @@ const TRAINER_TABS = [
   ["Terminarz", "📅"],
   ["Kody",       "🔑"],
   ["Wiadomości", "✉"],
+  ["Quiz",       "🎯"],
   ["Profil",     "⚙"],
 ];
 
@@ -32,6 +33,52 @@ export default function App() {
   const [notifCert,    setNotifCert]     = useState(true);
   const [dataLoading,  setDataLoading]   = useState(false);
   const [msgCount,     setMsgCount]      = useState(0);
+  const lastMsgAt      = useRef(null);
+  const pollInterval   = useRef(null);
+
+  function requestNotifPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }
+
+  const checkMessages = useCallback(async (token) => {
+    if (!token) return;
+    try {
+      const msgs = await db.get(token, "messages", "order=created_at.desc&select=id,created_at,title&limit=20");
+      setMsgCount(msgs.length);
+      if (!msgs.length) return;
+      const newestAt = msgs[0].created_at;
+      if (lastMsgAt.current && newestAt > lastMsgAt.current) {
+        const newMsgs = msgs.filter(m => m.created_at > lastMsgAt.current);
+        if ("Notification" in window && Notification.permission === "granted") {
+          newMsgs.forEach(m => {
+            new Notification("📬 ENGEL Expert Academy", {
+              body: m.title,
+              icon: "/pwa-192.png",
+              badge: "/pwa-192.png",
+              tag: `msg-${m.id}`,
+              renotify: true,
+            });
+          });
+        }
+      }
+      lastMsgAt.current = newestAt;
+    } catch { /* cicho ignoruj błędy */ }
+  }, []);
+
+  // ── Sprawdza przy logowaniu i raz na dobę ─────────────────────────────────
+  useEffect(() => {
+    if (!user) {
+      if (pollInterval.current) { clearInterval(pollInterval.current); pollInterval.current = null; }
+      lastMsgAt.current = null;
+      return;
+    }
+    requestNotifPermission();
+    checkMessages(user.accessToken);
+    pollInterval.current = setInterval(() => checkMessages(user.accessToken), 24 * 60 * 60_000);
+    return () => { if (pollInterval.current) clearInterval(pollInterval.current); };
+  }, [user, checkMessages]);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [trainerView,      setTrainerViewRaw]    = useState("client");
   // trainingOverrides trzyma nadpisania z Supabase — NIE mutujemy globalnego TRAININGS
@@ -115,11 +162,6 @@ export default function App() {
       const comps = await db.get(u.accessToken, "completions", `user_id=eq.${u.id}&order=created_at.asc&select=*`);
       console.log("[LOGIN] completions loaded:", comps.length, comps);
       setCompleted(comps.map(c => ({ training:c.training_data, date:c.date, key:c.code_key, trainer:c.trainer||null, trainerNum:parseInt(c.code_key?.slice(-1))||1 })));
-
-      try {
-        const msgs = await db.get(u.accessToken, "messages", "select=id");
-        setMsgCount(msgs.length);
-      } catch {}
 
       // Overrides trafiają do stanu — NIE mutujemy globalnego modułu TRAININGS,
       // bo mutacja pozostaje między sesjami różnych użytkowników.
@@ -258,7 +300,8 @@ function AppContent({
         {tab===0 && <TrainerScheduleTab token={user.accessToken} trainerNum={user.trainer_id}/>}
         {tab===1 && <AdminCodeGen defaultTrainer={user.trainer_id}/>}
         {tab===2 && <MessagesTab token={user.accessToken} userEmail={user.email} user={user}/>}
-        {tab===3 && <ProfileTab user={user} setUser={setUserRaw} completed={completed} activeGroups={activeGroups} setActiveGroups={setActiveGroups} onLogout={handleLogout} trainerView={trainerView} setTrainerView={setTrainerView}/>}
+        {tab===3 && <AdminQuiz token={user.accessToken}/>}
+        {tab===4 && <ProfileTab user={user} setUser={setUserRaw} completed={completed} activeGroups={activeGroups} setActiveGroups={setActiveGroups} onLogout={handleLogout} trainerView={trainerView} setTrainerView={setTrainerView}/>}
       </div>
       <div className="tabbar" style={{display:"flex",background:C.white,borderTop:`1px solid ${C.grey}`,flexShrink:0}}>
         {TRAINER_TABS.map(([label,icon],i) => (

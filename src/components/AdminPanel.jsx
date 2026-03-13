@@ -445,6 +445,18 @@ const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec",
                    "Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
 const TIMELINE_TRAINERS = [1,2,3,4,5];
 
+// Helpery nieskończonego timeline
+const _EPOCH = new Date("2020-01-01T12:00:00");
+function _pad(n) { return String(n).padStart(2,"0"); }
+function _absDay(iso) { return Math.round((new Date(iso+"T12:00:00") - _EPOCH) / 86400000); }
+function _daysInMon(y, m) { return new Date(y, m+1, 0).getDate(); }
+function _shiftMonth({ year, month }, delta) {
+  let m = month + delta, y = year;
+  while (m > 11) { m -= 12; y++; }
+  while (m < 0)  { m += 12; y--; }
+  return { year: y, month: m };
+}
+
 function toISO(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 }
@@ -484,63 +496,98 @@ export function AdminSchedule({ token }) {
   const [notes,        setNotes]        = useState("");
   const [partCount,    setPartCount]    = useState("");
 
-  // Nawigacja kalendarza
-  const [viewYear,  setViewYear]  = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
+  // ── Nieskończony timeline ──
+  // Zamiast jednego miesiąca, renderujemy ciągłą wstążkę wielu miesięcy.
+  // Tablica months rozrasta się dynamicznie podczas scrollowania.
+  const [months, setMonths] = useState(() => {
+    const cur = { year: now.getFullYear(), month: now.getMonth() };
+    return [_shiftMonth(cur,-1), cur, _shiftMonth(cur,1)];
+  });
+  const [visibleLabel,   setVisibleLabel]   = useState({ year: now.getFullYear(), month: now.getMonth() });
 
   // Refs do obsługi long-press i double-tap na paskach
-  const pressTimers = useRef({});
-  const tapCounts   = useRef({});
-  const tapTimers   = useRef({});
-  const timelineRef = useRef(null);
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const monthISO = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}`;
-  const [cellW, setCellW] = useState(20);
+  const pressTimers        = useRef({});
+  const tapCounts          = useRef({});
+  const tapTimers          = useRef({});
+  const timelineRef        = useRef(null);
+  const pendingScrollAdjust = useRef(0);   // korekta po dodaniu miesiąca z lewej
+  const initialScrollDone  = useRef(false);
+  const isExtending        = useRef(false);
+
+  // Liczba dni widocznych w oknie bez scrollowania — zmień 12 na inną wartość aby dostosować szerokość komórek
+  const [cellW, setCellW] = useState(28); // wartość zastępcza — ResizeObserver natychmiast ją poprawi
+
+  // Oblicza offsety pikselowe każdego miesiąca
+  const { monthOffsets, totalWidth, originAbsDay: tlOrigin } = useMemo(() => {
+    if (!months.length) return { monthOffsets: [], totalWidth: 0, originAbsDay: 0 };
+    const origin = _absDay(`${months[0].year}-${_pad(months[0].month+1)}-01`);
+    const offsets = [];
+    let off = 0;
+    for (const m of months) { offsets.push(off); off += _daysInMon(m.year, m.month) * cellW; }
+    return { monthOffsets: offsets, totalWidth: off, originAbsDay: origin };
+  }, [months, cellW]);
 
   useEffect(() => {
     if (!timelineRef.current) return;
-
     function recalc() {
       if (!timelineRef.current) return;
       const available = timelineRef.current.clientWidth - 46;
       // Liczba dni widocznych w oknie bez scrollowania — zmień 12 na inną wartość aby dostosować szerokość komórek
-      setCellW(available / 8);
+      setCellW(available / 12);
     }
-
-    // ResizeObserver — Chrome, Android, nowoczesne przeglądarki
-    const ro = new ResizeObserver(() => recalc());
+    const ro = new ResizeObserver(recalc);
     ro.observe(timelineRef.current);
-
-    // orientationchange — fallback dla Safari iOS
-    // setTimeout bo Safari raportuje stary wymiar tuż po zdarzeniu
     function onOrient() { setTimeout(recalc, 150); }
     window.addEventListener("orientationchange", onOrient);
-
-    recalc(); // uruchom od razu
-
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("orientationchange", onOrient);
-    };
-  }, [daysInMonth, viewYear, viewMonth]);
+    recalc();
+    return () => { ro.disconnect(); window.removeEventListener("orientationchange", onOrient); };
+  }, []);
 
   useEffect(() => { loadScheduled(); }, []);
 
-  // Przewiń timeline tak, aby dziś był w ok. 1/4 widoku
+  // Jednorazowe przewinięcie do dzisiaj
   useEffect(() => {
-    if (!timelineRef.current) return;
-    const today = new Date();
-    if (today.getFullYear() !== viewYear || today.getMonth() !== viewMonth) return;
-    const todayDay = today.getDate();
-    const containerWidth = timelineRef.current.clientWidth;
-    const labelWidth = 46;
-    const cellW_ = timelineRef.current.scrollWidth > 0
-      ? (timelineRef.current.scrollWidth - 46) / daysInMonth
-      : 20;
-    const todayLeft = labelWidth + (todayDay - 1) * cellW_;
-    const scrollTo = todayLeft - containerWidth / 4;
-    timelineRef.current.scrollLeft = Math.max(0, scrollTo);
-  }, [viewYear, viewMonth, loading]);
+    if (!timelineRef.current || loading || cellW === 0 || initialScrollDone.current) return;
+    initialScrollDone.current = true;
+    const left = 46 + (_absDay(todayISO) - tlOrigin) * cellW;
+    timelineRef.current.scrollLeft = Math.max(0, left - timelineRef.current.clientWidth / 4);
+  }, [loading, cellW, tlOrigin]);
+
+  // Korekta scrollLeft po dodaniu miesiąca z lewej strony
+  useEffect(() => {
+    if (pendingScrollAdjust.current !== 0 && timelineRef.current) {
+      timelineRef.current.scrollLeft += pendingScrollAdjust.current;
+      pendingScrollAdjust.current = 0;
+    }
+    isExtending.current = false;
+  }, [months]);
+
+  // Scroll handler: rozszerza wstążkę i aktualizuje etykietę
+  function onTimelineScroll() {
+    const el = timelineRef.current;
+    if (!el || cellW === 0 || isExtending.current) return;
+    const sl = el.scrollLeft, vw = el.clientWidth, maxSl = el.scrollWidth - vw;
+    const centerX = sl + vw / 2;
+    for (let i = monthOffsets.length - 1; i >= 0; i--) {
+      if (centerX >= monthOffsets[i]) {
+        const m = months[i];
+        setVisibleLabel(prev => (prev.year===m.year&&prev.month===m.month)?prev:m);
+        break;
+      }
+    }
+    if (sl > maxSl - vw * 2) {
+      isExtending.current = true;
+      setMonths(prev => [...prev, _shiftMonth(prev[prev.length-1], 1)]);
+    }
+    if (sl < vw && sl > 0) {
+      isExtending.current = true;
+      setMonths(prev => {
+        const nm = _shiftMonth(prev[0], -1);
+        pendingScrollAdjust.current = _daysInMon(nm.year, nm.month) * cellW;
+        return [nm, ...prev];
+      });
+    }
+  }
 
   async function loadScheduled() {
     setLoading(true);
@@ -718,57 +765,54 @@ export function AdminSchedule({ token }) {
   // ── Timeline ──
   const todayISO = toISO(now);
 
+  // ── Buduje paski z absolutnymi pozycjami pikselowymi ──
   const timelineData = useMemo(() => {
+    if (!months.length) return TIMELINE_TRAINERS.map(tid => ({ trainerId: tid, bars: [] }));
+    const firstISO = `${months[0].year}-${_pad(months[0].month+1)}-01`;
+    const lastMon  = months[months.length-1];
+    const lastISO  = `${lastMon.year}-${_pad(lastMon.month+1)}-${_pad(_daysInMon(lastMon.year, lastMon.month))}`;
+    const origin   = _absDay(firstISO);
+
+    // Dołącz podgląd nowego wpisu
     const allEntries = [...scheduled];
-    // Podgląd nowego wpisu
     if (formMode === "new" && selDate && selTrainer) {
       const isST = trainingMode === "ST";
       const training = isST ? null : TRAININGS.find(t=>t.id===selTraining);
       const grp = GROUPS.find(g=>g.id===training?.group);
-      const color = isST ? "#8E44AD" : (grp?.color || "#2980B9");
       allEntries.push({
         id: "__preview__", date: selDate, end_date: previewEndDate,
-        training_id: isST ? "ST" : selTraining,
-        trainer_id: selTrainer,
+        training_id: isST ? "ST" : selTraining, trainer_id: selTrainer,
         custom_name: isST ? (stName||"ST") : null,
-        __preview: true, __color: color,
-        __title: isST ? (stName||"ST") : (training?.short||"?"),
-        status: "active",
+        __preview: true, __color: isST ? "#8E44AD" : (grp?.color || "#2980B9"),
+        __title: isST ? (stName||"ST") : (training?.short||"?"), status: "active",
       });
     }
+
     return TIMELINE_TRAINERS.map(trainerId => {
-      const bars = allEntries.filter(s=>Number(s.trainer_id)===trainerId).map(s => {
-        const isST = s.training_id === "ST";
-        const training = isST ? null : TRAININGS.find(t=>t.id===s.training_id);
-        const grp = GROUPS.find(g=>g.id===training?.group);
-        const baseColor = s.__color || (isST ? "#8E44AD" : (grp?.color || "#2980B9"));
-        const isPlanned = (s.status || "active") === "planned";
-        const color = isPlanned ? "#BBBBBB" : baseColor;
-        const title = s.__title || (isST ? (s.custom_name||"ST") : (training?.short || s.training_id));
-        const startISO = s.date || "";
-        const endISO   = s.end_date || s.date || "";
-        if (!startISO) return null;
-        const monthStart = monthISO + "-01";
-        const monthEnd   = monthISO + "-" + String(daysInMonth).padStart(2,"0");
-        if (endISO < monthStart || startISO > monthEnd) return null;
-        const clippedStart = startISO < monthStart ? monthStart : startISO;
-        const clippedEnd   = endISO   > monthEnd   ? monthEnd   : endISO;
-        const startDay = parseInt(clippedStart.slice(8)) || 1;
-        const endDay   = parseInt(clippedEnd.slice(8))   || daysInMonth;
-        if (isNaN(startDay) || isNaN(endDay) || startDay > endDay) return null;
-        return {
-          startDay, endDay, color, title, trainerId: s.trainer_id, id: s.id,
-          isPreview: !!s.__preview, isPlanned,
-          isHidden: s.is_hidden || false,
-          isOutgoing: s.is_outgoing || false,
-          participantsCount: s.participants_count,
-          entry: s,
-          cellW,
-        };
-      }).filter(Boolean);
+      const bars = allEntries
+        .filter(s => Number(s.trainer_id) === trainerId)
+        .map(s => {
+          const startISO = s.date || "", endISO = s.end_date || s.date || "";
+          if (!startISO || endISO < firstISO || startISO > lastISO) return null;
+          const isST      = s.training_id === "ST";
+          const training  = isST ? null : TRAININGS.find(t => t.id === s.training_id);
+          const grp       = GROUPS.find(g => g.id === training?.group);
+          const baseColor = s.__color || (isST ? "#8E44AD" : (grp?.color || "#2980B9"));
+          const isPlanned = (s.status || "active") === "planned";
+          const color     = isPlanned ? "#BBBBBB" : baseColor;
+          const title     = s.__title || (isST ? (s.custom_name||"ST") : (training?.short || s.training_id));
+          const cs   = startISO < firstISO ? firstISO : startISO;
+          const ce   = endISO   > lastISO  ? lastISO  : endISO;
+          const left  = (_absDay(cs) - origin) * cellW;
+          const width = Math.max(cellW - 2, (_absDay(ce) - _absDay(cs) + 1) * cellW - 2);
+          return { left, width, color, title, trainerId: s.trainer_id, id: s.id,
+            isPreview: !!s.__preview, isPlanned, isHidden: s.is_hidden||false,
+            isOutgoing: s.is_outgoing||false, participantsCount: s.participants_count, entry: s };
+        })
+        .filter(Boolean);
       return { trainerId, bars };
     });
-  }, [scheduled, viewYear, viewMonth, formMode, selDate, selTraining, trainingMode, stName, previewEndDate, selTrainer]);
+  }, [scheduled, months, cellW, formMode, selDate, selTraining, trainingMode, stName, previewEndDate, selTrainer]);
 
   const listToShow = scheduled.filter(s => (s.end_date||s.date) >= todayISO).slice(0, 20);
 
@@ -776,8 +820,7 @@ export function AdminSchedule({ token }) {
   function BarItem({ bar }) {
     if (bar.isPreview) {
       return (
-        <div style={{position:"absolute",left:(bar.startDay-1)*(bar.cellW||20),top:4,height:22,
-          width:Math.max((bar.cellW||20)-2,(bar.endDay-bar.startDay+1)*(bar.cellW||20)-2),zIndex:2,
+        <div style={{position:"absolute",left:bar.left,top:4,height:22,width:bar.width,zIndex:2,
           background:bar.color+"99",borderRadius:3,display:"flex",alignItems:"center",
           padding:"0 3px",overflow:"hidden",boxSizing:"border-box",
           border:`1px dashed ${bar.color}`,cursor:"default"}}>
@@ -785,8 +828,6 @@ export function AdminSchedule({ token }) {
         </div>
       );
     }
-    const cw = bar.cellW || 20;
-    const w = Math.max(cw-2,(bar.endDay-bar.startDay+1)*cw-2);
     const badgeVal = bar.participantsCount != null ? bar.participantsCount : null;
     return (
       <div
@@ -799,30 +840,22 @@ export function AdminSchedule({ token }) {
         onContextMenu={e => e.preventDefault()}
         title={`${bar.title}${bar.isPlanned?" [planowane]":""}${bar.isHidden?" [ukryte]":""}${bar.isOutgoing?" [wyjazdowe]":""}\nTap=edytuj · 2×tap=planned · przytrzymaj=usuń`}
         style={{
-          position:"absolute",left:(bar.startDay-1)*cw,top:4,height:22,width:w,zIndex:2,
+          position:"absolute",left:bar.left,top:4,height:22,width:bar.width,zIndex:2,
           background:bar.color,borderRadius:3,display:"flex",alignItems:"center",
           padding:"0 3px",gap:2,cursor:"pointer",overflow:"hidden",boxSizing:"border-box",
           opacity: bar.isPlanned ? 0.75 : 1,
           border: bar.isHidden ? "1px solid rgba(0,0,0,.35)" : "none",
         }}>
-        {bar.isHidden && (
-          <span style={{flexShrink:0,fontSize:7,color:"rgba(255,255,255,.85)",lineHeight:1}}>🔒</span>
-        )}
-        {bar.isOutgoing && !bar.isHidden && (
-          <span style={{flexShrink:0,fontSize:7,color:"rgba(255,255,255,.85)",lineHeight:1}}>✈️</span>
-        )}
+        {bar.isHidden && <span style={{flexShrink:0,fontSize:7,color:"rgba(255,255,255,.85)",lineHeight:1}}>🔒</span>}
+        {bar.isOutgoing && !bar.isHidden && <span style={{flexShrink:0,fontSize:7,color:"rgba(255,255,255,.85)",lineHeight:1}}>✈️</span>}
         <span style={{fontSize:8,fontWeight:700,color:"#fff",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",flex:1}}>
           {bar.title}{bar.isPlanned?" ···":""}
         </span>
-        {badgeVal !== null ? (
+        {badgeVal !== null && (
           <span style={{flexShrink:0,background:"rgba(0,0,0,.35)",borderRadius:"50%",width:12,height:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#fff",lineHeight:"12px",fontWeight:700}}>
             {badgeVal > 99 ? "99+" : badgeVal}
           </span>
-        ) : bar.trainerId ? (
-          <span style={{flexShrink:0,background:"rgba(0,0,0,.35)",borderRadius:"50%",width:12,height:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"#fff",lineHeight:"12px",fontWeight:700}}>
-            {bar.trainerId}
-          </span>
-        ) : null}
+        )}
       </div>
     );
   }
@@ -832,27 +865,32 @@ export function AdminSchedule({ token }) {
 
       {/* ── Timeline ── */}
       <div style={{background:C.white,borderRadius:8,boxShadow:"0 1px 4px rgba(0,0,0,.1)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderBottom:`1px solid ${C.grey}`}}>
-          <button onClick={()=>{if(viewMonth===0){setViewYear(y=>y-1);setViewMonth(11);}else setViewMonth(m=>m-1);}}
-            style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:C.greyDk,padding:"4px 10px",lineHeight:1}}>‹</button>
-          <span style={{fontSize:13,fontWeight:700,color:C.black}}>{MONTHS_PL[viewMonth]} {viewYear}</span>
-          <button onClick={()=>{if(viewMonth===11){setViewYear(y=>y+1);setViewMonth(0);}else setViewMonth(m=>m+1);}}
-            style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:C.greyDk,padding:"4px 10px",lineHeight:1}}>›</button>
+
+        {/* Etykieta widocznego miesiąca — aktualizuje się przy scrollu */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"8px 10px",borderBottom:`1px solid ${C.grey}`}}>
+          <span style={{fontSize:13,fontWeight:700,color:C.black}}>{MONTHS_PL[visibleLabel.month]} {visibleLabel.year}</span>
         </div>
 
-        <div ref={timelineRef} style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+        <div ref={timelineRef} onScroll={onTimelineScroll} style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
           <div style={{display:"inline-block",minWidth:"100%",verticalAlign:"top"}}>
-            {/* Nagłówek dni */}
+
+            {/* Nagłówek dni — ciągły przez wszystkie miesiące */}
             <div style={{display:"flex",borderBottom:`2px solid ${C.grey}`}}>
               <div style={{width:46,minWidth:46,flexShrink:0,background:"#f7f7f7",borderRight:`1px solid ${C.grey}`,fontSize:9,fontWeight:700,color:C.greyMid,display:"flex",alignItems:"center",justifyContent:"center",height:22}}>T</div>
-              <div style={{display:"flex",flex:1}}>
-                {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>{
-                  const iso=`${monthISO}-${String(d).padStart(2,"0")}`;
-                  const isToday=iso===todayISO;
-                  const isWe=new Date(iso+"T12:00:00").getDay()%6===0;
+              <div style={{display:"flex"}}>
+                {months.map((mon,mi)=>{
+                  const days=_daysInMon(mon.year,mon.month);
                   return (
-                    <div key={d} style={{width:cellW,minWidth:cellW,flexShrink:0,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWe?"#aaa":C.greyMid,background:isToday?C.greenBg:isWe?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box"}}>
-                      {d}
+                    <div key={`${mon.year}-${mon.month}`} style={{display:"flex",position:"relative",borderLeft:mi>0?`2px solid ${C.grey}`:"none"}}>
+                      <div style={{position:"absolute",top:1,left:3,fontSize:7,fontWeight:700,color:C.green,letterSpacing:.3,pointerEvents:"none",lineHeight:"9px"}}>
+                        {MONTHS_PL[mon.month].slice(0,3).toUpperCase()}
+                      </div>
+                      {Array.from({length:days},(_,i)=>i+1).map(d=>{
+                        const iso=`${mon.year}-${_pad(mon.month+1)}-${_pad(d)}`;
+                        const isToday=iso===todayISO;
+                        const isWe=new Date(iso+"T12:00:00").getDay()%6===0;
+                        return <div key={d} style={{width:cellW,minWidth:cellW,flexShrink:0,height:22,display:"flex",alignItems:"flex-end",justifyContent:"center",paddingBottom:2,fontSize:9,fontWeight:isToday?700:400,color:isToday?C.greenDk:isWe?"#aaa":C.greyMid,background:isToday?C.greenBg:isWe?"#e8e8e8":"transparent",borderRight:"1px solid #efefef",boxSizing:"border-box"}}>{d}</div>;
+                      })}
                     </div>
                   );
                 })}
@@ -865,20 +903,23 @@ export function AdminSchedule({ token }) {
               return (
                 <div key={tid} style={{display:"flex",borderBottom:`1px solid ${C.grey}`}}>
                   <div style={{width:46,minWidth:46,flexShrink:0,background:"#f7f7f7",borderRight:`1px solid ${C.grey}`,fontSize:9,fontWeight:700,color:C.greyDk,display:"flex",alignItems:"center",justifyContent:"center",height:30}}>T{tid}</div>
-                  <div style={{position:"relative",height:30,flex:1,minWidth:daysInMonth*cellW}}>
-                    {/* Klikalne komórki — otwierają formularz nowego szkolenia */}
-                    {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>{
-                      const iso=`${monthISO}-${String(d).padStart(2,"0")}`;
+                  <div style={{position:"relative",height:30,width:totalWidth,flexShrink:0}}>
+                    {/* Klikalne komórki tła */}
+                    {months.map((mon,mi)=>Array.from({length:_daysInMon(mon.year,mon.month)},(_,i)=>i+1).map(d=>{
+                      const iso=`${mon.year}-${_pad(mon.month+1)}-${_pad(d)}`;
                       const isToday=iso===todayISO;
                       const isWe=new Date(iso+"T12:00:00").getDay()%6===0;
-                      return (
-                        <div key={d} onClick={()=>openNewForm(iso,tid)}
-                          style={{position:"absolute",left:(d-1)*cellW,top:0,width:cellW,height:"100%",background:isToday?"rgba(138,183,62,.12)":isWe?"rgba(0,0,0,.05)":"transparent",cursor:"pointer",zIndex:0}}/>
-                      );
-                    })}
-                    {Array.from({length:daysInMonth},(_,i)=>i+1).map(d=>(
-                      <div key={d} style={{position:"absolute",left:d*cellW,top:0,width:1,height:"100%",background:"#efefef",pointerEvents:"none",zIndex:0}}/>
+                      return <div key={`${mi}-${d}`} onClick={()=>openNewForm(iso,tid)} style={{position:"absolute",left:monthOffsets[mi]+(d-1)*cellW,top:0,width:cellW,height:"100%",background:isToday?"rgba(138,183,62,.12)":isWe?"rgba(0,0,0,.05)":"transparent",cursor:"pointer",zIndex:0}}/>;
+                    }))}
+                    {/* Linie pionowe */}
+                    {months.map((mon,mi)=>Array.from({length:_daysInMon(mon.year,mon.month)},(_,i)=>i+1).map(d=>(
+                      <div key={`${mi}-${d}`} style={{position:"absolute",left:monthOffsets[mi]+d*cellW,top:0,width:1,height:"100%",background:"#efefef",pointerEvents:"none",zIndex:0}}/>
+                    )))}
+                    {/* Separatory miesięcy */}
+                    {monthOffsets.slice(1).map((off,i)=>(
+                      <div key={i} style={{position:"absolute",left:off,top:0,width:2,height:"100%",background:C.grey,pointerEvents:"none",zIndex:1}}/>
                     ))}
+                    {/* Paski szkoleń */}
                     {roomBars.map((bar,bi)=><BarItem key={bi} bar={bar}/>)}
                   </div>
                 </div>
@@ -886,8 +927,6 @@ export function AdminSchedule({ token }) {
             })}
           </div>
         </div>
-
-
       </div>
 
       {/* ── Anuluj / formularz ── */}
@@ -1090,6 +1129,295 @@ export function AdminSchedule({ token }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+/* ── Admin: Zarządzanie quizem ─────────────────────────────────────────── */
+
+export function AdminQuiz({ token }) {
+  const [quizzes,      setQuizzes]      = useState([]);
+  const [selQuiz,      setSelQuiz]      = useState(null);   // null = lista quizów
+  const [questions,    setQuestions]    = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [saving,       setSaving]       = useState(false);
+  const [deleting,     setDeleting]     = useState(null);
+  const [err,          setErr]          = useState("");
+
+  // Formularz nowego quizu
+  const [showQuizForm, setShowQuizForm] = useState(false);
+  const [qzMode,       setQzMode]       = useState("training"); // "training"|"custom"
+  const [qzTraining,   setQzTraining]   = useState(TRAININGS[0].id);
+  const [qzCustom,     setQzCustom]     = useState("");
+
+  // Formularz pytania
+  const [showQForm,    setShowQForm]    = useState(false);
+  const [editingQ,     setEditingQ]     = useState(null);
+  const [fQ,  setFQ]  = useState("");
+  const [fA,  setFA]  = useState("");
+  const [fB,  setFB]  = useState("");
+  const [fC,  setFC]  = useState("");
+  const [fAns,setFAns]= useState("a");
+
+  // ── Załaduj quizy z liczbą pytań ──────────────────────────────────────────
+  async function loadQuizzes() {
+    setLoading(true); setErr("");
+    try {
+      const data = await db.get(token, "quizzes", "order=created_at.asc&select=*");
+      // Pobierz liczby pytań dla każdego quizu
+      const counts = await db.get(token, "quiz_questions", "select=quiz_id");
+      const countMap = {};
+      counts.forEach(q => { countMap[q.quiz_id] = (countMap[q.quiz_id] || 0) + 1; });
+      setQuizzes(data.map(qz => ({ ...qz, questionCount: countMap[qz.id] || 0 })));
+    } catch(e) { setErr("Błąd: " + e.message); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadQuizzes(); }, []);
+
+  // ── Załaduj pytania wybranego quizu ───────────────────────────────────────
+  async function loadQuestions(quizId) {
+    setLoading(true);
+    try {
+      const data = await db.get(token, "quiz_questions", `quiz_id=eq.${quizId}&order=created_at.asc&select=*`);
+      setQuestions(data);
+    } catch(e) { setErr("Błąd: " + e.message); }
+    finally { setLoading(false); }
+  }
+
+  function openQuiz(qz) {
+    setSelQuiz(qz);
+    setErr("");
+    setShowQForm(false);
+    loadQuestions(qz.id);
+  }
+
+  function backToList() {
+    setSelQuiz(null);
+    setShowQForm(false);
+    setEditingQ(null);
+    loadQuizzes();
+  }
+
+  // ── Utwórz nowy quiz ──────────────────────────────────────────────────────
+  async function createQuiz() {
+    const title = qzMode === "training"
+      ? (TRAININGS.find(t => t.id === qzTraining)?.title || qzTraining)
+      : qzCustom.trim();
+    const training_id = qzMode === "training" ? qzTraining : null;
+    if (!title) { setErr("Podaj nazwę quizu."); return; }
+    setSaving(true); setErr("");
+    try {
+      const res = await db.insert(token, "quizzes", { title, training_id });
+      setShowQuizForm(false);
+      setQzCustom("");
+      await loadQuizzes();
+      // Od razu wejdź do nowego quizu
+      if (res?.[0]) openQuiz({ ...res[0], questionCount: 0 });
+    } catch(e) { setErr("Błąd: " + e.message); }
+    finally { setSaving(false); }
+  }
+
+  // ── Usuń quiz ─────────────────────────────────────────────────────────────
+  async function deleteQuiz(qzId) {
+    if (!window.confirm("Usuń quiz wraz ze wszystkimi pytaniami?")) return;
+    setDeleting(qzId);
+    try {
+      await db.remove(token, "quizzes", `id=eq.${qzId}`);
+      setQuizzes(p => p.filter(q => q.id !== qzId));
+    } catch(e) { alert("Błąd: " + e.message); }
+    finally { setDeleting(null); }
+  }
+
+  // ── Formularz pytania ─────────────────────────────────────────────────────
+  function openNewQ() {
+    setEditingQ(null); setFQ(""); setFA(""); setFB(""); setFC(""); setFAns("a");
+    setShowQForm(true); setErr("");
+  }
+  function openEditQ(q) {
+    setEditingQ(q); setFQ(q.question); setFA(q.answer_a); setFB(q.answer_b); setFC(q.answer_c); setFAns(q.correct);
+    setShowQForm(true); setErr("");
+  }
+  async function saveQ() {
+    if (!fQ.trim()||!fA.trim()||!fB.trim()||!fC.trim()) { setErr("Wypełnij wszystkie pola."); return; }
+    setSaving(true); setErr("");
+    const payload = { question:fQ.trim(), answer_a:fA.trim(), answer_b:fB.trim(), answer_c:fC.trim(), correct:fAns, quiz_id:selQuiz.id };
+    try {
+      if (editingQ) await db.update(token, "quiz_questions", `id=eq.${editingQ.id}`, payload);
+      else          await db.insert(token, "quiz_questions", payload);
+      setShowQForm(false);
+      await loadQuestions(selQuiz.id);
+    } catch(e) { setErr("Błąd zapisu: " + e.message); }
+    finally { setSaving(false); }
+  }
+  async function deleteQ(id) {
+    setDeleting(id);
+    try {
+      await db.remove(token, "quiz_questions", `id=eq.${id}`);
+      setQuestions(p => p.filter(q => q.id !== id));
+    } catch(e) { alert("Błąd: " + e.message); }
+    finally { setDeleting(null); }
+  }
+
+  const inpStyle = { width:"100%", boxSizing:"border-box", border:`1px solid ${C.grey}`, padding:"9px 12px", fontSize:13, marginBottom:10, borderRadius:4 };
+
+  /* ════ WIDOK LISTY QUIZÓW ════ */
+  if (!selQuiz) return (
+    <div style={{padding:12,display:"flex",flexDirection:"column",gap:10}}>
+      {err && <div style={{background:"#FDEDEC",border:`1px solid ${C.red}`,padding:"10px 14px",fontSize:13,color:C.red,borderRadius:4}}>{err}</div>}
+
+      <button onClick={() => { setShowQuizForm(p => !p); setErr(""); }}
+        style={{background:C.green,border:"none",color:C.white,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",borderRadius:6}}>
+        {showQuizForm ? "Anuluj" : "+ Nowy quiz"}
+      </button>
+
+      {/* Formularz nowego quizu */}
+      {showQuizForm && (
+        <div style={{background:C.white,padding:16,borderRadius:8,boxShadow:"0 2px 8px rgba(0,0,0,.1)"}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>Nowy quiz</div>
+          <div style={{display:"flex",gap:0,marginBottom:12,border:`1px solid ${C.grey}`,borderRadius:6,overflow:"hidden"}}>
+            {[["training","Ze szkolenia"],["custom","Własna nazwa"]].map(([mode,label]) => (
+              <button key={mode} onClick={() => setQzMode(mode)}
+                style={{flex:1,padding:"9px 4px",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,
+                  background:qzMode===mode?C.black:C.white, color:qzMode===mode?C.white:C.greyMid}}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {qzMode === "training" ? (
+            <select value={qzTraining} onChange={e => setQzTraining(e.target.value)} style={inpStyle}>
+              {TRAININGS.map(t => (
+                <option key={t.id} value={t.id}>{t.id} — {t.short}: {t.title.slice(0,50)}{t.title.length>50?"…":""}</option>
+              ))}
+            </select>
+          ) : (
+            <input value={qzCustom} onChange={e => setQzCustom(e.target.value)}
+              placeholder="Nazwa quizu (np. Bezpieczeństwo pracy)" style={inpStyle}/>
+          )}
+
+          {err && <div style={{color:C.red,fontSize:12,marginBottom:8}}>{err}</div>}
+          <button onClick={createQuiz} disabled={saving}
+            style={{width:"100%",background:C.black,border:"none",color:C.white,padding:11,fontSize:13,fontWeight:700,cursor:"pointer",borderRadius:4}}>
+            {saving ? "Tworzę..." : "Utwórz quiz i dodaj pytania →"}
+          </button>
+        </div>
+      )}
+
+      {loading && <div style={{textAlign:"center",padding:32}}><Spinner/></div>}
+
+      {!loading && !quizzes.length && (
+        <div style={{textAlign:"center",color:C.greyMid,padding:32,fontSize:13}}>Brak quizów. Utwórz pierwszy.</div>
+      )}
+
+      {quizzes.map(qz => (
+        <div key={qz.id} style={{background:C.white,borderRadius:8,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,.06)",display:"flex",alignItems:"center",gap:10}}>
+          <div style={{flex:1,cursor:"pointer",minWidth:0}} onClick={() => openQuiz(qz)}>
+            <div style={{fontSize:13,fontWeight:700,color:C.black,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {qz.title}
+            </div>
+            <div style={{fontSize:11,color:C.greyMid}}>
+              {qz.training_id && <span style={{marginRight:8,color:C.green,fontWeight:600}}>{qz.training_id}</span>}
+              {qz.questionCount} {qz.questionCount===1?"pytanie":qz.questionCount>=2&&qz.questionCount<=4?"pytania":"pytań"}
+            </div>
+          </div>
+          <button onClick={() => openQuiz(qz)}
+            style={{background:C.greyBg,border:`1px solid ${C.grey}`,padding:"6px 12px",fontSize:11,fontWeight:700,cursor:"pointer",borderRadius:4,flexShrink:0}}>
+            Edytuj →
+          </button>
+          <button onClick={() => deleteQuiz(qz.id)} disabled={deleting===qz.id}
+            style={{background:"none",border:`1px solid ${C.red}`,padding:"6px 10px",fontSize:11,cursor:"pointer",borderRadius:4,color:C.red,flexShrink:0}}>
+            {deleting===qz.id?"...":"🗑"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+
+  /* ════ WIDOK PYTAŃ WYBRANEGO QUIZU ════ */
+  return (
+    <div style={{padding:12,display:"flex",flexDirection:"column",gap:10}}>
+      {/* Nagłówek */}
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={backToList}
+          style={{background:"none",border:`1px solid ${C.grey}`,padding:"6px 10px",fontSize:12,cursor:"pointer",borderRadius:4,flexShrink:0}}>
+          ← Lista
+        </button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selQuiz.title}</div>
+          {selQuiz.training_id && <div style={{fontSize:11,color:C.green,fontWeight:600}}>{selQuiz.training_id}</div>}
+        </div>
+      </div>
+
+      {err && <div style={{background:"#FDEDEC",border:`1px solid ${C.red}`,padding:"10px 14px",fontSize:13,color:C.red,borderRadius:4}}>{err}</div>}
+
+      <button onClick={openNewQ}
+        style={{background:C.green,border:"none",color:C.white,padding:"11px",fontSize:13,fontWeight:700,cursor:"pointer",borderRadius:6}}>
+        + Dodaj pytanie
+      </button>
+
+      {/* Formularz pytania */}
+      {showQForm && (
+        <div style={{background:C.white,padding:16,borderRadius:8,boxShadow:"0 2px 8px rgba(0,0,0,.1)"}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>{editingQ?"Edytuj pytanie":"Nowe pytanie"}</div>
+          <textarea value={fQ} onChange={e => setFQ(e.target.value)} placeholder="Treść pytania" rows={3}
+            style={{...inpStyle,resize:"vertical",fontFamily:"inherit"}}/>
+          {["a","b","c"].map(k => (
+            <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <button onClick={() => setFAns(k)} style={{
+                width:28,height:28,borderRadius:"50%",border:"none",flexShrink:0,cursor:"pointer",fontWeight:700,fontSize:12,
+                background:fAns===k?C.green:"#eee", color:fAns===k?C.white:C.greyMid,
+              }}>{k.toUpperCase()}</button>
+              <input value={k==="a"?fA:k==="b"?fB:fC}
+                onChange={e=>(k==="a"?setFA:k==="b"?setFB:setFC)(e.target.value)}
+                placeholder={`Odpowiedź ${k.toUpperCase()}`}
+                style={{...inpStyle,marginBottom:0,flex:1,border:`1px solid ${fAns===k?C.green:C.grey}`}}/>
+            </div>
+          ))}
+          <div style={{fontSize:11,color:C.greyMid,marginBottom:8}}>Kliknij literę aby zaznaczyć poprawną odpowiedź</div>
+          {err && <div style={{color:C.red,fontSize:12,marginBottom:8}}>{err}</div>}
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={saveQ} disabled={saving}
+              style={{flex:1,background:C.black,border:"none",color:C.white,padding:11,fontSize:13,fontWeight:700,cursor:"pointer",borderRadius:4}}>
+              {saving?"Zapisuję...":"Zapisz"}
+            </button>
+            <button onClick={() => setShowQForm(false)}
+              style={{flex:1,background:"none",border:`1px solid ${C.grey}`,color:C.greyDk,padding:11,fontSize:13,cursor:"pointer",borderRadius:4}}>
+              Anuluj
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading && <div style={{textAlign:"center",padding:24}}><Spinner/></div>}
+      {!loading && !questions.length && !showQForm && (
+        <div style={{textAlign:"center",color:C.greyMid,padding:32,fontSize:13}}>Brak pytań. Dodaj pierwsze pytanie.</div>
+      )}
+
+      {questions.map((q, i) => (
+        <div key={q.id} style={{background:C.white,borderRadius:8,padding:"12px 14px",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:6}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.black,lineHeight:1.4,flex:1}}>{i+1}. {q.question}</div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <button onClick={() => openEditQ(q)} style={{background:"none",border:`1px solid ${C.grey}`,padding:"3px 8px",fontSize:11,cursor:"pointer",borderRadius:3}}>✏️</button>
+              <button onClick={() => deleteQ(q.id)} disabled={deleting===q.id}
+                style={{background:"none",border:`1px solid ${C.red}`,padding:"3px 8px",fontSize:11,cursor:"pointer",borderRadius:3,color:C.red}}>
+                {deleting===q.id?"...":"🗑"}
+              </button>
+            </div>
+          </div>
+          {["a","b","c"].map(k => (
+            <div key={k} style={{
+              fontSize:12,padding:"4px 8px",marginBottom:3,borderRadius:4,
+              background:k===q.correct?"#EAFAF1":C.greyBg,
+              color:k===q.correct?"#1a7a40":C.greyDk,
+              fontWeight:k===q.correct?700:400,
+              border:k===q.correct?`1px solid ${C.green}`:"none",
+            }}>
+              {k.toUpperCase()}. {q[`answer_${k}`]} {k===q.correct&&"✓"}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

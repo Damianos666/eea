@@ -5,6 +5,7 @@ import { parseCode, calcProgress } from "../lib/helpers";
 import { Spinner, SecTitle, ClipboardSvg } from "./SharedUI";
 import { CelebModal, CertModal } from "./Modals";
 import { useT } from "../lib/LangContext";
+import { QuizGame, QuizResultModal } from "./QuizGame";
 
 function formatDays(n, T) {
   const d = parseInt(n, 10);
@@ -18,6 +19,9 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
   const [status,      setStatus]      = useState(null);
   const [celebEntry,  setCelebEntry]  = useState(null);
   const [certEntry,   setCertEntry]   = useState(null);
+  const [showQuiz,    setShowQuiz]    = useState(false);
+  const [quizMode,    setQuizMode]    = useState("training"); // "training"|"custom"
+  const [quizResult,  setQuizResult]  = useState(null);
 
   // Okienko potwierdzenia (dni + opcjonalnie nazwa dla ST)
   const [confirm,     setConfirm]     = useState(null); // { parsed, training, rawCode }
@@ -35,6 +39,20 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
   );
 
   function verify() {
+    // Trigger quizu
+    if (code.trim().toLowerCase() === "sprawdzam") {
+      setCode(""); setStatus(null);
+      setQuizMode("training");
+      setShowQuiz(true);
+      return;
+    }
+    if (code.trim().toLowerCase() === "gram") {
+      setCode(""); setStatus(null);
+      setQuizMode("custom");
+      setShowQuiz(true);
+      return;
+    }
+
     const parsed = parseCode(code);
     if (!parsed) { setStatus("invalid"); return; }
 
@@ -80,6 +98,8 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
     };
     onComplete(entry);
     setCelebEntry(entry);
+    // Haptic feedback — wzorzec: krótki puls · pauza · mocniejszy akcent · pauza · finał
+    if (navigator.vibrate) navigator.vibrate([60, 80, 120, 60, 200]);
     setCode("");
     setStatus(null);
     setConfirm(null);
@@ -193,6 +213,7 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
 
   if (completed.length === 0) return (
     <div style={{background:C.greyBg,flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
+      {showQuiz && <QuizGame token={user.accessToken} user={user} mode={quizMode} onComplete={entry => { onComplete(entry); }} onClose={() => setShowQuiz(false)}/>}
       {celebEntry && <CelebModal entry={celebEntry} onClose={() => setCelebEntry(null)}/>}
       {confirmModal}
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100%",padding:"32px 24px 48px",textAlign:"center"}}>
@@ -209,8 +230,10 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
 
   return (
     <div style={{background:C.greyBg,flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",paddingBottom:16}}>
+      {showQuiz && <QuizGame token={user.accessToken} user={user} mode={quizMode} onComplete={entry => { onComplete(entry); setShowQuiz(false); }} onClose={() => setShowQuiz(false)}/>}
       {celebEntry && <CelebModal entry={celebEntry} onClose={() => setCelebEntry(null)}/>}
-      {certEntry  && <CertModal  entry={certEntry}  user={user} onClose={() => setCertEntry(null)}/>}
+      {certEntry   && <CertModal       entry={certEntry}  user={user} onClose={() => setCertEntry(null)}/>}
+      {quizResult  && <QuizResultModal entry={quizResult} onClose={() => setQuizResult(null)}/>}
       {confirmModal}
       <div style={{background:C.white,margin:12,padding:18,boxShadow:"0 1px 3px rgba(0,0,0,.07)"}}>
         <div style={{fontSize:11,fontWeight:700,letterSpacing:1,color:C.greyDk,marginBottom:14,textTransform:"uppercase"}}>{T.enter_code}</div>
@@ -250,7 +273,8 @@ export function TrainingTab({ user, completed, onComplete, activeGroups, loading
                 <div style={{fontSize:14,fontWeight:600,color:C.black}}>{c.training.title}</div>
                 <div style={{fontSize:12,color:C.greyMid,marginTop:2}}>{c.training.category} · {c.training.duration} · {c.date}</div>
               </div>
-              <button style={{background:"none",border:`1px solid ${C.grey}`,color:C.greyDk,padding:"7px 12px",fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} onClick={() => setCertEntry(c)}>{T.certificate}</button>
+              {c.training.category !== "quiz" && <button style={{background:"none",border:`1px solid ${C.grey}`,color:C.greyDk,padding:"7px 12px",fontSize:11,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}} onClick={() => setCertEntry(c)}>{T.certificate}</button>}
+              {c.training.category === "quiz" && <button style={{background:"#F0F7E0",border:"none",color:"#6E9430",padding:"7px 12px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",borderRadius:4}} onClick={() => setQuizResult(c)}>🏆 Wynik</button>}
             </div>
           ))}
       </div>

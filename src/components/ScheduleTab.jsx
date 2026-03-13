@@ -11,11 +11,19 @@ function toISO(date) {
 }
 function today() { return toISO(new Date()); }
 
-// Generuje i pobiera plik .ics dla jednego szkolenia
+// Generuje i pobiera plik .ics dla jednego szkolenia (obsługuje też ST)
 function downloadICS(s, t) {
-  const date = s.date.replace(/-/g, ""); // YYYYMMDD
+  const isST   = s.training_id === "ST";
+  const title  = isST ? (s.custom_name || "Szkolenie specjalne") : t.title;
+  const fileId = isST ? ("ST-" + (s.custom_name||"spec").replace(/\s+/g,"-").slice(0,20)) : t.id;
+  const dateStart = s.date.replace(/-/g, "");
+  const endRaw  = s.end_date || s.date;
+  const endDate = new Date(endRaw + "T12:00:00");
+  endDate.setDate(endDate.getDate() + 1);
+  const dateEnd = `${endDate.getFullYear()}${String(endDate.getMonth()+1).padStart(2,"0")}${String(endDate.getDate()).padStart(2,"0")}`;
+  const isMultiDay = s.end_date && s.end_date !== s.date;
   const now  = new Date().toISOString().replace(/[-:.]/g,"").slice(0,15) + "Z";
-  const uid  = `${s.id}-${date}@engel-academy`;
+  const uid  = `${s.id}-${dateStart}@engel-academy`;
   const ics  = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -23,9 +31,9 @@ function downloadICS(s, t) {
     "BEGIN:VEVENT",
     `UID:${uid}`,
     `DTSTAMP:${now}`,
-    `DTSTART;TZID=Europe/Warsaw:${date}T083000`,
-    `DTEND;TZID=Europe/Warsaw:${date}T160000`,
-    `SUMMARY:${t.title}`,
+    isMultiDay ? `DTSTART;VALUE=DATE:${dateStart}` : `DTSTART;TZID=Europe/Warsaw:${dateStart}T083000`,
+    isMultiDay ? `DTEND;VALUE=DATE:${dateEnd}`      : `DTEND;TZID=Europe/Warsaw:${dateStart}T160000`,
+    `SUMMARY:${title}`,
     "DESCRIPTION:ENGEL Expert Academy",
     "END:VEVENT",
     "END:VCALENDAR"
@@ -33,7 +41,7 @@ function downloadICS(s, t) {
   const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
-  a.href = url; a.download = `szkolenie-${t.id}-${date}.ics`; a.click();
+  a.href = url; a.download = `szkolenie-${fileId}-${dateStart}.ics`; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -262,10 +270,16 @@ export function ScheduleTab({ activeGroups, token }) {
                     </>
                   )}
                 </div>
-                {!isST && (
+                {!isST ? (
                   <button onClick={() => downloadICS(s, t)}
                     title="Dodaj do kalendarza (.ics)"
                     style={{background:"#F0F7FF",border:"1px solid #0072C6",borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:16,lineHeight:1,flexShrink:0}}>
+                    📅
+                  </button>
+                ) : (
+                  <button onClick={() => downloadICS(s, null)}
+                    title="Dodaj do kalendarza (.ics)"
+                    style={{background:"#F9F0FF",border:"1px solid #8E44AD",borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:16,lineHeight:1,flexShrink:0}}>
                     📅
                   </button>
                 )}
